@@ -1,0 +1,21 @@
+-- Extensions and core enums.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TYPE role_kind AS ENUM ('HR_ADMIN', 'DEPT_HEAD', 'ASSESSOR', 'PRECEPTOR');
+
+CREATE TYPE history_event_kind AS ENUM (
+    'HIRED', 'PROMOTED', 'TRANSFERRED', 'EXTERNAL_EXPERIENCE', 'COMMENT', 'OTHER'
+);
+
+CREATE TYPE audit_action AS ENUM (
+    'CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'LOGIN_FAILED', 'ROLE_GRANT', 'ROLE_REVOKE'
+);
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;

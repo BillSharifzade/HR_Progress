@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HR Progress</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      * {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      *::-webkit-scrollbar {
+        display: none;
+      }
+      @keyframes deptSectionSlide {
+        from { opacity: 0; transform: translateY(-6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .dept-section-panel {
+        animation: deptSectionSlide 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      @keyframes deptSectionClose {
+        from { opacity: 1; transform: translateY(0); }
+        to   { opacity: 0; transform: translateY(-6px); }
+      }
+      .dept-section-panel-close {
+        animation: deptSectionClose 0.15s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+      }
+      @keyframes fieldControlIn {
+        from { opacity: 0; transform: translateX(-3px); }
+        to   { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes fieldTextIn {
+        from { opacity: 0; transform: translateX(3px); }
+        to   { opacity: 1; transform: translateX(0); }
+      }
+      .field-control { animation: fieldControlIn 0.14s ease-out; }
+      .field-text    { animation: fieldTextIn 0.14s ease-out; }
+      @keyframes editBtnIn {
+        from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      .edit-btn-group { animation: editBtnIn 0.16s ease-out; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+.tools/
+*.xlsx.bak
+.env
+.env.local
+deploy/.env
+
+# Backend
+backend/server
+backend/dist/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
