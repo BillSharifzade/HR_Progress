@@ -7,7 +7,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
 import {
@@ -211,7 +211,7 @@ export function WorkersList() {
   const effectiveDeptId    = forcedDeptId    ?? deptId;
   const effectiveSectionId = forcedSectionId;
 
-  const { data: workers = [], isLoading } = useQuery({
+  const { data: workers = [], isLoading, isFetching } = useQuery({
     queryKey: ['workers', search, effectiveDeptId, effectiveSectionId, gradeId, includeInactive],
     queryFn: () => listWorkers({
       search: search || undefined,
@@ -220,6 +220,10 @@ export function WorkersList() {
       grade_id: gradeId,
       include_inactive: includeInactive || undefined,
     }),
+    // Keep showing the previous page while a new query (e.g. an extra search
+    // character) is in flight, so the search input is never unmounted and
+    // keeps focus between keystrokes.
+    placeholderData: keepPreviousData,
   });
 
   const { data: departments = [] } = useQuery({ queryKey: ['departments'], queryFn: listDepartments });
@@ -318,6 +322,7 @@ export function WorkersList() {
         rowKey="id"
         columns={columns}
         dataSource={workers}
+        loading={isFetching}
         pagination={{ pageSize: 20, showSizeChanger: false }}
         onRow={(r) => ({ onClick: () => navigate(`/workers/${r.id}`) })}
         style={{ cursor: 'pointer' }}

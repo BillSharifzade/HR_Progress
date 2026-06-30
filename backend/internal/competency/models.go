@@ -288,7 +288,10 @@ type AddParticipantsRequest struct {
 	Participants []ParticipantInput `json:"participants" validate:"required,min=1,dive"`
 }
 
-// ConsolidatedScore is the average ASSESSOR-group mark for (period, worker, competency).
+// ConsolidatedScore is the finalized matrix mark for (period, worker,
+// competency): the average of equally-weighted voices — the assessor group as
+// one voice (their average) plus each HEAD / DEPT_HEAD / DCR_HEAD (see
+// MaybeFinalize).
 type ConsolidatedScore struct {
 	ID           uuid.UUID `json:"id"`
 	PeriodID     uuid.UUID `json:"period_id"`

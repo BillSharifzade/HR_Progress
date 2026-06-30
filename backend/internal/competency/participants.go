@@ -220,8 +220,19 @@ func (r *Repository) UpsertScoreFor(ctx context.Context, periodID, employeeID, c
 }
 
 // MaybeFinalize checks whether every ASSESSOR-group participant has a non-null
-// score for (period, employee, competency); if so, averages those scores and
-// upserts the consolidated row. Idempotent — safe to call after each save.
+// score for (period, employee, competency); if so, it writes the consolidated
+// matrix mark and upserts the consolidated row. Idempotent — safe to call after
+// each save.
+//
+// The matrix mark averages "voices" that each weigh equally (Way A): the whole
+// ASSESSOR group counts as a SINGLE voice (the average of their marks), and the
+// subdivision head (HEAD), department head (DEPT_HEAD) and DHR head (DCR_HEAD)
+// each count as one voice too. So e.g. assessors {6,8}, HEAD 9, DEPT 8, DHR 7 →
+// avg(7, 9, 8, 7) = 7.75 — adding more assessors does not outweigh the heads.
+// HRA is excluded: it is the derived assessor average, not a real evaluator.
+// The head slots fold in whenever those marks exist; until their scoring UI
+// ships the mark equals the assessor average and auto-upgrades later. NB: the
+// learning-group engine (groups.go) deliberately uses ASSESSOR-only scores.
 func (r *Repository) MaybeFinalize(ctx context.Context, periodID, employeeID, competencyID uuid.UUID) error {
 	assessors, err := r.AssessorParticipants(ctx, periodID)
 	if err != nil {
@@ -230,18 +241,31 @@ func (r *Repository) MaybeFinalize(ctx context.Context, periodID, employeeID, co
 	if len(assessors) == 0 {
 		return nil
 	}
-	// Count assessor scores that are non-null for this cell.
+	// `have` gates finalization: how many assigned assessors have scored this
+	// cell. `avg` is the across-voices average — the assessor group as one
+	// voice plus each present head — which is the value written to the matrix.
 	var have int
 	var avg float64
 	err = r.db.QueryRow(ctx, `
-		SELECT count(*), COALESCE(AVG(score), 0)
-		  FROM assessment_scores
-		 WHERE period_id = $1
-		   AND employee_id = $2
-		   AND competency_id = $3
-		   AND assessor_role = 'ASSESSOR'
-		   AND score IS NOT NULL
-		   AND user_id = ANY($4::uuid[])`,
+		WITH assessor AS (
+		  SELECT count(*) AS n, AVG(score) AS group_avg
+		    FROM assessment_scores
+		   WHERE period_id = $1 AND employee_id = $2 AND competency_id = $3
+		     AND assessor_role = 'ASSESSOR' AND score IS NOT NULL
+		     AND user_id = ANY($4::uuid[])
+		),
+		voices AS (
+		  -- the assessor group counts as a single voice
+		  SELECT group_avg AS v FROM assessor WHERE group_avg IS NOT NULL
+		  UNION ALL
+		  -- each head counts as its own voice
+		  SELECT score FROM assessment_scores
+		   WHERE period_id = $1 AND employee_id = $2 AND competency_id = $3
+		     AND assessor_role IN ('HEAD', 'DEPT_HEAD', 'DCR_HEAD')
+		     AND score IS NOT NULL
+		)
+		SELECT (SELECT n FROM assessor),
+		       COALESCE((SELECT AVG(v) FROM voices), 0)`,
 		periodID, employeeID, competencyID, assessors,
 	).Scan(&have, &avg)
 	if err != nil {
