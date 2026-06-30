@@ -251,18 +251,25 @@ func (r *Repository) DeleteDepartment(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *Repository) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Period, error) {
-	var rows interface{ Next() bool; Scan(...any) error; Err() error; Close() }
+	var rows interface {
+		Next() bool
+		Scan(...any) error
+		Err() error
+		Close()
+	}
 	var err error
 
+	const cols = `id, title, department_id, period_start, period_end, is_active,
+		status, group_size, confirmed_at, published_at, created_by, created_at, updated_at`
 	if deptID != nil {
 		rows, err = r.db.Query(ctx, `
-			SELECT id, title, department_id, period_start, period_end, is_active, created_by, created_at, updated_at
+			SELECT `+cols+`
 			FROM assessment_periods
 			WHERE department_id = $1
 			ORDER BY period_start DESC`, *deptID)
 	} else {
 		rows, err = r.db.Query(ctx, `
-			SELECT id, title, department_id, period_start, period_end, is_active, created_by, created_at, updated_at
+			SELECT `+cols+`
 			FROM assessment_periods
 			ORDER BY period_start DESC`)
 	}
@@ -274,8 +281,7 @@ func (r *Repository) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Peri
 	var out []Period
 	for rows.Next() {
 		var p Period
-		if err := rows.Scan(&p.ID, &p.Title, &p.DepartmentID, &p.PeriodStart, &p.PeriodEnd,
-			&p.IsActive, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := scanPeriod(rows, &p); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -283,29 +289,44 @@ func (r *Repository) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Peri
 	return out, rows.Err()
 }
 
+type rowScanner interface{ Scan(...any) error }
+
+func scanPeriod(row rowScanner, p *Period) error {
+	return row.Scan(&p.ID, &p.Title, &p.DepartmentID, &p.PeriodStart, &p.PeriodEnd,
+		&p.IsActive, &p.Status, &p.GroupSize, &p.ConfirmedAt, &p.PublishedAt,
+		&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+}
+
 func (r *Repository) CreatePeriod(ctx context.Context, p Period) (Period, error) {
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO assessment_periods (title, department_id, period_start, period_end, is_active, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, title, department_id, period_start, period_end, is_active, created_by, created_at, updated_at`,
-		p.Title, p.DepartmentID, p.PeriodStart, p.PeriodEnd, p.IsActive, p.CreatedBy,
-	).Scan(&p.ID, &p.Title, &p.DepartmentID, &p.PeriodStart, &p.PeriodEnd, &p.IsActive, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
-	return p, err
+	if p.GroupSize <= 0 {
+		p.GroupSize = 12
+	}
+	out := p
+	if err := scanPeriod(r.db.QueryRow(ctx, `
+		INSERT INTO assessment_periods (title, department_id, period_start, period_end, is_active, group_size, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, title, department_id, period_start, period_end, is_active,
+		          status, group_size, confirmed_at, published_at, created_by, created_at, updated_at`,
+		p.Title, p.DepartmentID, p.PeriodStart, p.PeriodEnd, p.IsActive, p.GroupSize, p.CreatedBy,
+	), &out); err != nil {
+		return Period{}, err
+	}
+	return out, nil
 }
 
 func (r *Repository) GetPeriod(ctx context.Context, id uuid.UUID) (Period, error) {
 	var p Period
-	err := r.db.QueryRow(ctx, `
-		SELECT id, title, department_id, period_start, period_end, is_active, created_by, created_at, updated_at
-		FROM assessment_periods WHERE id = $1`, id,
-	).Scan(&p.ID, &p.Title, &p.DepartmentID, &p.PeriodStart, &p.PeriodEnd, &p.IsActive, &p.CreatedBy, &p.CreatedAt, &p.UpdatedAt)
+	err := scanPeriod(r.db.QueryRow(ctx, `
+		SELECT id, title, department_id, period_start, period_end, is_active,
+		       status, group_size, confirmed_at, published_at, created_by, created_at, updated_at
+		FROM assessment_periods WHERE id = $1`, id), &p)
 	return p, err
 }
 
 func (r *Repository) ListScores(ctx context.Context, periodID uuid.UUID) ([]Score, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, period_id, employee_id, competency_id, assessor_role,
-		       score, feedback, assessed_by, assessed_at, updated_at
+		       score, feedback, auto_interpretation, assessed_by, assessed_at, updated_at
 		FROM assessment_scores
 		WHERE period_id = $1
 		ORDER BY employee_id, competency_id, assessor_role`, periodID)
@@ -318,7 +339,7 @@ func (r *Repository) ListScores(ctx context.Context, periodID uuid.UUID) ([]Scor
 	for rows.Next() {
 		var s Score
 		if err := rows.Scan(&s.ID, &s.PeriodID, &s.EmployeeID, &s.CompetencyID, &s.AssessorRole,
-			&s.Score, &s.Feedback, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt); err != nil {
+			&s.Score, &s.Feedback, &s.AutoInterpretation, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

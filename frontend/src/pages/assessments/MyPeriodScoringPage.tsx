@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   Alert, Button, Card, Empty, Input, InputNumber, List, Space, Spin, Tabs, Tag, Tooltip,
   Typography, message,
@@ -12,6 +12,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import {
   listMyAssessmentPeriods, listEmployees, listRequirements, listMyScoresIn, upsertScore,
+  lookupInterpretation,
 } from '../../api/competency';
 import type { Employee, ParticipantRole } from '../../types';
 import { ParticipantRoleLabel } from '../../types';
@@ -127,8 +128,46 @@ export function MyPeriodScoringPage() {
 
   // Pending edits: { `${worker_id}:${competency_id}:${role}`: value }
   const [draft, setDraft] = useState<Record<string, number | null>>({});
+  // Final interpretation text edits (FR-AS7.2.2), keyed like scores.
+  const [draftText, setDraftText] = useState<Record<string, string>>({});
+  // Auto-interpretation cache keyed `${wid}:${cid}:${score}` (FR-AS7.2.1).
+  const [autoInterp, setAutoInterp] = useState<Record<string, { found: boolean; text: string }>>({});
 
   const scoreKey = (wid: string, cid: string, role: ParticipantRole) => `${wid}:${cid}:${role}`;
+  const interpKey = (wid: string, cid: string, score: number) => `${wid}:${cid}:${score}`;
+
+  // Fetch and cache the system interpretation for a (worker, competency, score).
+  const fetchInterp = async (wid: string, cid: string, score: number) => {
+    const k = interpKey(wid, cid, score);
+    if (k in autoInterp) return;
+    try {
+      const r = await lookupInterpretation(wid, cid, score);
+      setAutoInterp(prev => ({ ...prev, [k]: { found: r.found, text: r.text ?? '' } }));
+    } catch {
+      setAutoInterp(prev => ({ ...prev, [k]: { found: false, text: '' } }));
+    }
+  };
+
+  const currentText = (cid: string): string => {
+    if (!selectedWorker || !activeRole) return '';
+    const k = scoreKey(selectedWorker.id, cid, activeRole);
+    if (k in draftText) return draftText[k];
+    const existing = myScores.find(s =>
+      s.employee_id === selectedWorker.id && s.competency_id === cid && s.assessor_role === activeRole,
+    );
+    return existing?.feedback ?? '';
+  };
+
+  // Prefetch interpretations for already-saved scores of the selected worker.
+  useEffect(() => {
+    if (!selectedWorker || !activeRole) return;
+    for (const s of myScores) {
+      if (s.employee_id === selectedWorker.id && s.assessor_role === activeRole && s.score != null) {
+        void fetchInterp(selectedWorker.id, s.competency_id, Math.round(s.score));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWorkerId, activeRole, myScores]);
 
   const currentScore = (cid: string): number | null => {
     if (!selectedWorker || !activeRole) return null;
@@ -143,20 +182,27 @@ export function MyPeriodScoringPage() {
   };
 
   const dirtyKeys = Object.keys(draft);
+  const pendingCount = new Set([...dirtyKeys, ...Object.keys(draftText)]).size;
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!periodId || dirtyKeys.length === 0) return;
     setSaving(true);
     try {
-      for (const k of dirtyKeys) {
+      // Union of keys that changed score or interpretation text.
+      const keys = new Set<string>([...dirtyKeys, ...Object.keys(draftText)]);
+      for (const k of keys) {
         const [wid, cid, role] = k.split(':');
+        const scoreVal = k in draft
+          ? draft[k]
+          : myScores.find(s => s.employee_id === wid && s.competency_id === cid && s.assessor_role === role)?.score ?? null;
         await upsertScore(periodId, {
           employee_id: wid, competency_id: cid, assessor_role: role,
-          score: draft[k], feedback: null,
+          score: scoreVal, feedback: draftText[k] ?? null,
         });
       }
       setDraft({});
+      setDraftText({});
       await refetchScores();
       msg.success('Сохранено');
     } catch {
@@ -303,10 +349,10 @@ export function MyPeriodScoringPage() {
                         size="small"
                         icon={<SaveOutlined />}
                         loading={saving}
-                        disabled={dirtyKeys.length === 0}
+                        disabled={pendingCount === 0}
                         onClick={handleSave}
                       >
-                        Сохранить ({dirtyKeys.length})
+                        Сохранить ({pendingCount})
                       </Button>
                       <Button size="small" onClick={goNextWorker}>
                         Следующий →
@@ -333,8 +379,12 @@ export function MyPeriodScoringPage() {
                             const grade = selectedWorker.grade_level ?? 0;
                             const req = reqLookup[c.competency_id]?.[grade];
                             const sc = currentScore(c.competency_id);
+                            const wid = selectedWorker.id;
+                            const interp = sc != null ? autoInterp[interpKey(wid, c.competency_id, Math.round(sc))] : undefined;
+                            const text = currentText(c.competency_id);
                             return (
-                              <tr key={c.competency_id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                              <Fragment key={c.competency_id}>
+                              <tr style={{ borderBottom: text || sc != null ? 'none' : '1px solid #f5f5f5' }}>
                                 <td style={{ padding: '8px 4px' }}>
                                   <Space size={4}>
                                     <Tag color={c.kind === 'LK' ? 'blue' : c.kind === 'UK' ? 'purple' : 'gold'} style={{ fontSize: 10 }}>
@@ -357,12 +407,12 @@ export function MyPeriodScoringPage() {
                                 </td>
                                 <td style={{ textAlign: 'center', padding: '8px 4px' }}>
                                   <InputNumber
-                                    min={0}
+                                    min={1}
                                     max={10}
                                     step={0.1}
                                     precision={1}
                                     value={sc ?? undefined}
-                                    placeholder="0.0"
+                                    placeholder="1–10"
                                     style={{ width: 90 }}
                                     onChange={(v) => {
                                       if (!selectedWorker || !activeRole) return;
@@ -370,10 +420,60 @@ export function MyPeriodScoringPage() {
                                         ...d,
                                         [scoreKey(selectedWorker.id, c.competency_id, activeRole)]: v ?? null,
                                       }));
+                                      if (v != null) void fetchInterp(selectedWorker.id, c.competency_id, Math.round(v));
                                     }}
                                   />
                                 </td>
                               </tr>
+                              {sc != null && (
+                                <tr style={{ borderBottom: '1px solid #f5f5f5' }}>
+                                  <td colSpan={3} style={{ padding: '0 4px 10px 4px' }}>
+                                    {interp?.found && (
+                                      <Alert
+                                        type="info"
+                                        showIcon
+                                        style={{ marginBottom: 6, fontSize: 12 }}
+                                        message="Системная интерпретация"
+                                        description={<span style={{ fontSize: 12 }}>{interp.text}</span>}
+                                        action={
+                                          <Button
+                                            size="small"
+                                            type="link"
+                                            onClick={() => {
+                                              if (!activeRole) return;
+                                              setDraftText(d => ({
+                                                ...d,
+                                                [scoreKey(wid, c.competency_id, activeRole)]: interp.text,
+                                              }));
+                                            }}
+                                          >
+                                            Использовать
+                                          </Button>
+                                        }
+                                      />
+                                    )}
+                                    {interp && !interp.found && (
+                                      <Text type="secondary" style={{ fontSize: 11 }}>
+                                        Для выбранной оценки текстовая интерпретация не настроена.
+                                      </Text>
+                                    )}
+                                    <Input.TextArea
+                                      placeholder="Комментарий / итоговая интерпретация"
+                                      autoSize={{ minRows: 1, maxRows: 4 }}
+                                      value={text}
+                                      style={{ marginTop: 4, fontSize: 12 }}
+                                      onChange={(e) => {
+                                        if (!activeRole) return;
+                                        setDraftText(d => ({
+                                          ...d,
+                                          [scoreKey(wid, c.competency_id, activeRole)]: e.target.value,
+                                        }));
+                                      }}
+                                    />
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             );
                           })}
                         </tbody>

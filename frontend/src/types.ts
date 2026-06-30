@@ -194,10 +194,37 @@ export interface AssessmentScore {
   assessor_role: AssessorRole;
   score: number | null;
   feedback?: string | null;
+  auto_interpretation?: string | null;
   assessed_by?: string | null;
   assessed_at?: string | null;
   updated_at: string;
 }
+
+export type CampaignStatus =
+  | 'draft'
+  | 'assigned'
+  | 'in_progress'
+  | 'admin_review'
+  | 'confirmed'
+  | 'published';
+
+export const CampaignStatusLabel: Record<CampaignStatus, string> = {
+  draft:        'Черновик',
+  assigned:     'Назначена',
+  in_progress:  'В процессе',
+  admin_review: 'На проверке',
+  confirmed:    'Подтверждена',
+  published:    'Опубликована',
+};
+
+export const CampaignStatusColor: Record<CampaignStatus, string> = {
+  draft:        'default',
+  assigned:     'blue',
+  in_progress:  'processing',
+  admin_review: 'gold',
+  confirmed:    'cyan',
+  published:    'green',
+};
 
 export interface AssessmentPeriod {
   id: string;
@@ -206,9 +233,127 @@ export interface AssessmentPeriod {
   period_start: string;
   period_end: string;
   is_active: boolean;
+  status: CampaignStatus;
+  group_size: number;
+  confirmed_at?: string | null;
+  published_at?: string | null;
   created_by?: string | null;
   created_at: string;
   updated_at: string;
+  department_ids?: string[];
+  section_ids?: string[];
+}
+
+export interface Criterion {
+  id: string;
+  period_id: string;
+  competency_id: string;
+  competency_code?: string;
+  name: string;
+  description?: string | null;
+  min_score?: number | null;
+  sort_order: number;
+}
+
+export interface Assessee {
+  id: string;
+  period_id: string;
+  user_id: string;
+  full_name?: string;
+  status: string;
+  grade_id?: string | null;
+  grade_name?: string | null;
+  department_id?: string | null;
+  added_at: string;
+}
+
+export interface AssesseeAssessor {
+  id: string;
+  period_id: string;
+  assessee_user_id: string;
+  assessor_user_id: string;
+  assessor_name?: string;
+}
+
+export interface Interpretation {
+  id: string;
+  department_id: string;
+  department_name?: string;
+  grade_id: string;
+  grade_name?: string;
+  competency_id: string;
+  competency_name?: string;
+  score: number;
+  text: string;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InterpretationHistoryEntry {
+  id: string;
+  interpretation_id?: string | null;
+  score: number;
+  text: string;
+  version: number;
+  action: string;
+  changed_by?: string | null;
+  changed_at: string;
+}
+
+export interface InterpretationLookup {
+  found: boolean;
+  text?: string;
+}
+
+export interface GroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  full_name?: string;
+  avg_score: number;
+  position: number;
+}
+
+export interface DevZone {
+  competency_id: string;
+  competency_name?: string;
+  avg_score: number;
+  rank: number;
+}
+
+export interface LearningGroup {
+  id: string;
+  period_id: string;
+  group_no: number;
+  score_min?: number | null;
+  score_max?: number | null;
+  strength_competency_id?: string | null;
+  strength_name?: string;
+  strength_score?: number | null;
+  confirmed: boolean;
+  formed_at: string;
+  members: GroupMember[];
+  dev_zones: DevZone[];
+}
+
+export interface GroupJournalEntry {
+  id: string;
+  group_id?: string | null;
+  action: string;
+  detail?: string | null;
+  actor_id?: string | null;
+  at: string;
+}
+
+export interface EmployeeResult {
+  period_id: string;
+  period_title: string;
+  competency_id: string;
+  competency_name: string;
+  avg_score: number;
+  published_at?: string | null;
 }
 
 export type UserRole =
@@ -286,4 +431,6 @@ export interface ConsolidatedScore {
 export interface PeriodWithScores {
   period: AssessmentPeriod;
   scores: AssessmentScore[];
+  criteria?: Criterion[];
+  assessees?: Assessee[];
 }

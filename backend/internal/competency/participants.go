@@ -195,25 +195,27 @@ func (r *Repository) AssessorParticipants(ctx context.Context, periodID uuid.UUI
 	return out, rows.Err()
 }
 
-// UpsertScoreFor a specific user. Sets user_id and assessed_by.
-func (r *Repository) UpsertScoreFor(ctx context.Context, periodID, employeeID, competencyID, userID uuid.UUID, role string, score *float64, feedback *string) (Score, error) {
+// UpsertScoreFor a specific user. Sets user_id and assessed_by. autoInterp is
+// the system-suggested interpretation snapshot at save time (FR-AS7.2 rule 24).
+func (r *Repository) UpsertScoreFor(ctx context.Context, periodID, employeeID, competencyID, userID uuid.UUID, role string, score *float64, feedback, autoInterp *string) (Score, error) {
 	var s Score
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO assessment_scores
-		    (period_id, employee_id, competency_id, assessor_role, user_id, score, feedback, assessed_by, assessed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $5, now())
+		    (period_id, employee_id, competency_id, assessor_role, user_id, score, feedback, auto_interpretation, assessed_by, assessed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $5, now())
 		ON CONFLICT (period_id, employee_id, competency_id, user_id)
 		  WHERE user_id IS NOT NULL
-		  DO UPDATE SET assessor_role = EXCLUDED.assessor_role,
-		                score         = EXCLUDED.score,
-		                feedback      = EXCLUDED.feedback,
-		                assessed_by   = EXCLUDED.assessed_by,
-		                assessed_at   = EXCLUDED.assessed_at
+		  DO UPDATE SET assessor_role       = EXCLUDED.assessor_role,
+		                score               = EXCLUDED.score,
+		                feedback            = EXCLUDED.feedback,
+		                auto_interpretation = EXCLUDED.auto_interpretation,
+		                assessed_by         = EXCLUDED.assessed_by,
+		                assessed_at         = EXCLUDED.assessed_at
 		RETURNING id, period_id, employee_id, competency_id, assessor_role,
-		          score, feedback, assessed_by, assessed_at, updated_at`,
-		periodID, employeeID, competencyID, role, userID, score, feedback,
+		          score, feedback, auto_interpretation, assessed_by, assessed_at, updated_at`,
+		periodID, employeeID, competencyID, role, userID, score, feedback, autoInterp,
 	).Scan(&s.ID, &s.PeriodID, &s.EmployeeID, &s.CompetencyID, &s.AssessorRole,
-		&s.Score, &s.Feedback, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt)
+		&s.Score, &s.Feedback, &s.AutoInterpretation, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt)
 	return s, err
 }
 
@@ -289,7 +291,7 @@ func (r *Repository) ListConsolidated(ctx context.Context, periodID uuid.UUID) (
 func (r *Repository) MyScoresIn(ctx context.Context, periodID, userID uuid.UUID) ([]Score, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, period_id, employee_id, competency_id, assessor_role,
-		       score, feedback, assessed_by, assessed_at, updated_at
+		       score, feedback, auto_interpretation, assessed_by, assessed_at, updated_at
 		  FROM assessment_scores
 		 WHERE period_id = $1 AND user_id = $2
 		 ORDER BY employee_id, competency_id`, periodID, userID)
@@ -301,7 +303,7 @@ func (r *Repository) MyScoresIn(ctx context.Context, periodID, userID uuid.UUID)
 	for rows.Next() {
 		var s Score
 		if err := rows.Scan(&s.ID, &s.PeriodID, &s.EmployeeID, &s.CompetencyID, &s.AssessorRole,
-			&s.Score, &s.Feedback, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt); err != nil {
+			&s.Score, &s.Feedback, &s.AutoInterpretation, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

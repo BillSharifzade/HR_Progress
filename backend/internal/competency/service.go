@@ -53,7 +53,8 @@ func (s *Service) BulkUpsertScores(ctx context.Context, periodID uuid.UUID, reqs
 		if !roleSet[role] {
 			return ErrRoleNotInParticipant
 		}
-		if _, err := s.repo.UpsertScoreFor(ctx, periodID, req.EmployeeID, req.CompetencyID, principalID, role, req.Score, req.Feedback); err != nil {
+		autoInterp := s.computeAutoInterp(ctx, req.EmployeeID, req.CompetencyID, req.Score)
+		if _, err := s.repo.UpsertScoreFor(ctx, periodID, req.EmployeeID, req.CompetencyID, principalID, role, req.Score, req.Feedback, autoInterp); err != nil {
 			return err
 		}
 		if err := s.repo.MaybeFinalize(ctx, periodID, req.EmployeeID, req.CompetencyID); err != nil {
@@ -180,6 +181,10 @@ func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, cre
 		PeriodEnd:   end,
 		IsActive:    true,
 		CreatedBy:   &createdBy,
+		GroupSize:   12,
+	}
+	if req.GroupSize != nil && *req.GroupSize > 0 {
+		p.GroupSize = *req.GroupSize
 	}
 	if req.DepartmentID != nil && *req.DepartmentID != "" {
 		id, err := uuid.Parse(*req.DepartmentID)
@@ -188,7 +193,57 @@ func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, cre
 		}
 		p.DepartmentID = &id
 	}
-	return s.repo.CreatePeriod(ctx, p)
+	created, err := s.repo.CreatePeriod(ctx, p)
+	if err != nil {
+		return Period{}, err
+	}
+
+	deptIDs, err := parseUUIDs(req.DepartmentIDs)
+	if err != nil {
+		return Period{}, errors.New("invalid department_ids")
+	}
+	if created.DepartmentID != nil {
+		deptIDs = appendUnique(deptIDs, *created.DepartmentID)
+	}
+	sectionIDs, err := parseUUIDs(req.SectionIDs)
+	if err != nil {
+		return Period{}, errors.New("invalid section_ids")
+	}
+	if err := s.repo.SetPeriodTargets(ctx, created.ID, deptIDs, sectionIDs); err != nil {
+		return Period{}, err
+	}
+	if len(req.Criteria) > 0 {
+		if err := s.repo.SetCriteria(ctx, created.ID, req.Criteria); err != nil {
+			return Period{}, err
+		}
+	}
+	created.DepartmentIDs = deptIDs
+	created.SectionIDs = sectionIDs
+	return created, nil
+}
+
+func parseUUIDs(in []string) ([]uuid.UUID, error) {
+	out := make([]uuid.UUID, 0, len(in))
+	for _, s := range in {
+		if s == "" {
+			continue
+		}
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+func appendUnique(ids []uuid.UUID, id uuid.UUID) []uuid.UUID {
+	for _, x := range ids {
+		if x == id {
+			return ids
+		}
+	}
+	return append(ids, id)
 }
 
 func (s *Service) GetPeriodWithScores(ctx context.Context, id uuid.UUID) (Period, []Score, error) {
@@ -283,7 +338,8 @@ func (s *Service) UpsertScore(ctx context.Context, periodID uuid.UUID, req Upser
 	if !found {
 		return Score{}, ErrRoleNotInParticipant
 	}
-	score, err := s.repo.UpsertScoreFor(ctx, periodID, req.EmployeeID, req.CompetencyID, principalID, role, req.Score, req.Feedback)
+	autoInterp := s.computeAutoInterp(ctx, req.EmployeeID, req.CompetencyID, req.Score)
+	score, err := s.repo.UpsertScoreFor(ctx, periodID, req.EmployeeID, req.CompetencyID, principalID, role, req.Score, req.Feedback, autoInterp)
 	if err != nil {
 		return Score{}, err
 	}
@@ -291,4 +347,18 @@ func (s *Service) UpsertScore(ctx context.Context, periodID uuid.UUID, req Upser
 		return Score{}, err
 	}
 	return score, nil
+}
+
+// computeAutoInterp resolves the system-suggested interpretation text for a
+// saved score (FR-AS7.2). Returns nil when no score or no configured text.
+func (s *Service) computeAutoInterp(ctx context.Context, employeeID, competencyID uuid.UUID, score *float64) *string {
+	if score == nil {
+		return nil
+	}
+	lk, err := s.LookupInterpretationForScore(ctx, employeeID, competencyID, int(*score))
+	if err != nil || !lk.Found {
+		return nil
+	}
+	text := lk.Text
+	return &text
 }

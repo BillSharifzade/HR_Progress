@@ -113,14 +113,180 @@ export async function listPeriods(deptId?: string): Promise<AssessmentPeriod[]> 
   return r.data;
 }
 
+export interface CriterionInput {
+  competency_id: string;
+  name?: string | null;
+  description?: string | null;
+  min_score?: number | null;
+}
+
 export async function createPeriod(payload: {
   title: string;
   department_id?: string;
   period_start: string;
   period_end: string;
+  group_size?: number;
+  department_ids?: string[];
+  section_ids?: string[];
+  criteria?: CriterionInput[];
 }): Promise<AssessmentPeriod> {
   const r = await client.post<AssessmentPeriod>('/assessment-periods/', payload);
   return r.data;
+}
+
+// ── Criteria (FR-AS3) ────────────────────────────────────────────────────────
+export async function listCriteria(periodId: string): Promise<import('../types').Criterion[]> {
+  const r = await client.get<import('../types').Criterion[]>(`/assessment-periods/${periodId}/criteria`);
+  return r.data ?? [];
+}
+
+export async function setCriteria(periodId: string, criteria: CriterionInput[]): Promise<import('../types').Criterion[]> {
+  const r = await client.put<import('../types').Criterion[]>(`/assessment-periods/${periodId}/criteria`, { criteria });
+  return r.data ?? [];
+}
+
+// ── Assessees (FR-AS2) ───────────────────────────────────────────────────────
+export async function listAssessees(periodId: string): Promise<import('../types').Assessee[]> {
+  const r = await client.get<import('../types').Assessee[]>(`/assessment-periods/${periodId}/assessees`);
+  return r.data ?? [];
+}
+
+export async function addAssessees(
+  periodId: string,
+  payload: { user_ids?: string[]; department_ids?: string[]; section_ids?: string[] },
+): Promise<{ added: number; assessees: import('../types').Assessee[] }> {
+  const r = await client.post(`/assessment-periods/${periodId}/assessees`, payload);
+  return r.data;
+}
+
+export async function removeAssessee(periodId: string, userId: string): Promise<void> {
+  await client.delete(`/assessment-periods/${periodId}/assessees/${userId}`);
+}
+
+// ── Per-assessee assessors (FR-AS4) ──────────────────────────────────────────
+export async function listAssesseeAssessors(periodId: string): Promise<import('../types').AssesseeAssessor[]> {
+  const r = await client.get<import('../types').AssesseeAssessor[]>(`/assessment-periods/${periodId}/assessee-assessors`);
+  return r.data ?? [];
+}
+
+export async function setAssesseeAssessors(
+  periodId: string,
+  assesseeId: string,
+  assessorUserIds: string[],
+): Promise<import('../types').AssesseeAssessor[]> {
+  const r = await client.put<import('../types').AssesseeAssessor[]>(
+    `/assessment-periods/${periodId}/assessees/${assesseeId}/assessors`,
+    { assessor_user_ids: assessorUserIds },
+  );
+  return r.data ?? [];
+}
+
+// ── Lifecycle (Section 5, FR-AS9, FR-AS10) ───────────────────────────────────
+export async function transitionPeriod(
+  periodId: string,
+  to: import('../types').CampaignStatus,
+): Promise<AssessmentPeriod> {
+  const r = await client.post<AssessmentPeriod>(`/assessment-periods/${periodId}/transition`, { to });
+  return r.data;
+}
+
+// ── Learning groups (FR-AS13) ────────────────────────────────────────────────
+export async function listGroups(periodId: string): Promise<import('../types').LearningGroup[]> {
+  const r = await client.get<import('../types').LearningGroup[]>(`/assessment-periods/${periodId}/groups`);
+  return r.data ?? [];
+}
+
+export async function listGroupJournal(periodId: string): Promise<import('../types').GroupJournalEntry[]> {
+  const r = await client.get<import('../types').GroupJournalEntry[]>(`/assessment-periods/${periodId}/groups/journal`);
+  return r.data ?? [];
+}
+
+export async function regenerateGroups(periodId: string, groupSize?: number): Promise<import('../types').LearningGroup[]> {
+  const r = await client.post<import('../types').LearningGroup[]>(
+    `/assessment-periods/${periodId}/groups/regenerate`,
+    groupSize ? { group_size: groupSize } : {},
+  );
+  return r.data ?? [];
+}
+
+export async function moveGroupMember(
+  periodId: string,
+  userId: string,
+  toGroupId: string,
+): Promise<import('../types').LearningGroup[]> {
+  const r = await client.post<import('../types').LearningGroup[]>(`/assessment-periods/${periodId}/groups/move`, {
+    user_id: userId,
+    to_group_id: toGroupId,
+  });
+  return r.data ?? [];
+}
+
+export async function confirmGroups(periodId: string): Promise<import('../types').LearningGroup[]> {
+  const r = await client.post<import('../types').LearningGroup[]>(`/assessment-periods/${periodId}/groups/confirm`, {});
+  return r.data ?? [];
+}
+
+// ── Interpretation reference (FR-AS7.2) ──────────────────────────────────────
+export async function listInterpretations(params: {
+  department_id?: string;
+  grade_id?: string;
+  competency_id?: string;
+}): Promise<import('../types').Interpretation[]> {
+  const r = await client.get<import('../types').Interpretation[]>('/interpretations/', { params });
+  return r.data ?? [];
+}
+
+export async function lookupInterpretation(
+  assesseeId: string,
+  competencyId: string,
+  score: number,
+): Promise<import('../types').InterpretationLookup> {
+  const r = await client.get<import('../types').InterpretationLookup>('/interpretations/lookup', {
+    params: { assessee_id: assesseeId, competency_id: competencyId, score },
+  });
+  return r.data;
+}
+
+export async function upsertInterpretation(payload: {
+  department_id: string;
+  grade_id: string;
+  competency_id: string;
+  score: number;
+  text: string;
+}): Promise<import('../types').Interpretation> {
+  const r = await client.post<import('../types').Interpretation>('/interpretations/', payload);
+  return r.data;
+}
+
+export async function deleteInterpretation(id: string): Promise<void> {
+  await client.delete(`/interpretations/${id}`);
+}
+
+export async function copyInterpretations(payload: {
+  from_department_id: string;
+  to_department_id: string;
+  from_grade_id?: string;
+  to_grade_id?: string;
+  overwrite?: boolean;
+}): Promise<{ copied: number }> {
+  const r = await client.post<{ copied: number }>('/interpretations/copy', payload);
+  return r.data;
+}
+
+export async function interpretationHistory(params: {
+  department_id?: string;
+  grade_id?: string;
+  competency_id?: string;
+  score?: number;
+}): Promise<import('../types').InterpretationHistoryEntry[]> {
+  const r = await client.get<import('../types').InterpretationHistoryEntry[]>('/interpretations/history', { params });
+  return r.data ?? [];
+}
+
+// ── Worker results (FR-AS10/AS11) ────────────────────────────────────────────
+export async function myAssessmentResults(): Promise<import('../types').EmployeeResult[]> {
+  const r = await client.get<import('../types').EmployeeResult[]>('/me/assessment-results/');
+  return r.data ?? [];
 }
 
 export async function getPeriodWithScores(periodId: string): Promise<PeriodWithScores> {

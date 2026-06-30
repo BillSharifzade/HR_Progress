@@ -15,6 +15,10 @@ const WorkerProfile = lazy(() => import('./pages/workers/WorkerProfile').then(m 
 const AdminPage = lazy(() => import('./pages/admin/AdminPage').then(m => ({ default: m.AdminPage })));
 const MyAssessmentsPage = lazy(() => import('./pages/assessments/MyAssessmentsPage').then(m => ({ default: m.MyAssessmentsPage })));
 const MyPeriodScoringPage = lazy(() => import('./pages/assessments/MyPeriodScoringPage').then(m => ({ default: m.MyPeriodScoringPage })));
+const CampaignsAdminPage = lazy(() => import('./pages/assessments/CampaignsAdminPage').then(m => ({ default: m.CampaignsAdminPage })));
+const CampaignDetailPage = lazy(() => import('./pages/assessments/CampaignDetailPage').then(m => ({ default: m.CampaignDetailPage })));
+const InterpretationsPage = lazy(() => import('./pages/interpretations/InterpretationsPage').then(m => ({ default: m.InterpretationsPage })));
+const MyResultsPage = lazy(() => import('./pages/assessments/MyResultsPage').then(m => ({ default: m.MyResultsPage })));
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -45,6 +49,10 @@ export default function App() {
         <Route path="/competencies" element={<Shell><CompetencyMatrixPage /></Shell>} />
         <Route path="/assessments" element={<Shell><MyAssessmentsPage /></Shell>} />
         <Route path="/assessments/:periodId" element={<Shell><MyPeriodScoringPage /></Shell>} />
+        <Route path="/my-results" element={<Shell><MyResultsPage /></Shell>} />
+        <Route path="/admin/assessments" element={<Shell><AdminOnly><CampaignsAdminPage /></AdminOnly></Shell>} />
+        <Route path="/admin/assessments/:periodId" element={<Shell><AdminOnly><CampaignDetailPage /></AdminOnly></Shell>} />
+        <Route path="/interpretations" element={<Shell><AdminOnly><InterpretationsPage /></AdminOnly></Shell>} />
         <Route path="/admin" element={<Shell><AdminOnly><AdminPage /></AdminOnly></Shell>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

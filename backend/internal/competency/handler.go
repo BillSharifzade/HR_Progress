@@ -70,14 +70,48 @@ func (h *Handler) Mount(r chi.Router, jwt *auth.JWTIssuer) {
 				r.Get("/", h.listParticipants)
 				r.With(requireAdmin).Post("/", h.addParticipants)
 			})
+			// Criteria (FR-AS3)
+			r.Get("/criteria", h.listCriteria)
+			r.With(requireAdmin).Put("/criteria", h.setCriteria)
+			// Assessees (FR-AS2) + per-assessee assessors (FR-AS4)
+			r.Get("/assessees", h.listAssessees)
+			r.With(requireAdmin).Post("/assessees", h.addAssessees)
+			r.With(requireAdmin).Delete("/assessees/{user_id}", h.removeAssessee)
+			r.Get("/assessee-assessors", h.listAssesseeAssessors)
+			r.With(requireAdmin).Put("/assessees/{user_id}/assessors", h.setAssesseeAssessors)
+			// Lifecycle (Section 5, FR-AS9, FR-AS10)
+			r.With(requireAdmin).Post("/transition", h.transitionPeriod)
+			// Learning groups (FR-AS13)
+			r.Get("/groups", h.listGroups)
+			r.Get("/groups/journal", h.listGroupJournal)
+			r.With(requireAdmin).Post("/groups/regenerate", h.regenerateGroups)
+			r.With(requireAdmin).Post("/groups/move", h.moveGroupMember)
+			r.With(requireAdmin).Post("/groups/confirm", h.confirmGroups)
+
 			r.Get("/my-scores", h.listMyScores)
 			r.Get("/consolidated", h.listConsolidated)
 		})
 	})
 
+	// Interpretation reference / справочник (FR-AS7.2)
+	r.Route("/interpretations", func(r chi.Router) {
+		r.Use(auth.RequireAuth(jwt))
+		r.Get("/", h.listInterpretations)
+		r.Get("/lookup", h.lookupInterpretation)
+		r.Get("/history", h.interpretationHistory)
+		r.With(requireAdmin).Post("/", h.upsertInterpretation)
+		r.With(requireAdmin).Post("/copy", h.copyInterpretations)
+		r.With(requireAdmin).Delete("/{id}", h.deleteInterpretation)
+	})
+
 	r.Route("/me/assessment-periods", func(r chi.Router) {
 		r.Use(auth.RequireAuth(jwt))
 		r.Get("/", h.listMyPeriods)
+	})
+
+	r.Route("/me/assessment-results", func(r chi.Router) {
+		r.Use(auth.RequireAuth(jwt))
+		r.Get("/", h.myAssessmentResults)
 	})
 
 	r.Route("/users", func(r chi.Router) {
@@ -98,7 +132,10 @@ func requireAdmin(next http.Handler) http.Handler {
 }
 
 func (h *Handler) listDepartments(w http.ResponseWriter, r *http.Request) {
-	var (depts []Department; err error)
+	var (
+		depts []Department
+		err   error
+	)
 	if r.URL.Query().Get("include_inactive") == "true" {
 		depts, err = h.svc.ListAllDepartments(r.Context())
 	} else {
@@ -428,9 +465,17 @@ func (h *Handler) getPeriod(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusInternalServerError, "INTERNAL", "internal error")
 		return
 	}
+	full, err := h.svc.GetPeriodFull(r.Context(), id)
+	if err == nil {
+		period = full
+	}
+	criteria, _ := h.svc.ListCriteria(r.Context(), id)
+	assessees, _ := h.svc.ListAssessees(r.Context(), id)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"period": period,
-		"scores": scores,
+		"period":    period,
+		"scores":    scores,
+		"criteria":  criteria,
+		"assessees": assessees,
 	})
 }
 
@@ -594,6 +639,16 @@ func (h *Handler) listConsolidated(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "invalid period_id")
 		return
+	}
+	// Consolidated results are admin-only until the campaign is published
+	// (FR-AS9/AS10). Non-admins may read them only after publication.
+	p, _ := auth.PrincipalFrom(r.Context())
+	if !p.HasRole("HR_ADMIN") {
+		period, err := h.svc.GetPeriodFull(r.Context(), periodID)
+		if err != nil || period.Status != StatusPublished {
+			httpx.WriteError(w, http.StatusForbidden, "NOT_PUBLISHED", "результаты ещё не опубликованы")
+			return
+		}
 	}
 	rows, err := h.svc.ListConsolidated(r.Context(), periodID)
 	if err != nil {

@@ -8,6 +8,8 @@ import {
   CalendarOutlined,
   RiseOutlined,
   BarChartOutlined,
+  SolutionOutlined,
+  FileTextOutlined,
   SettingOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -60,6 +62,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         { key: '/workers', icon: <TeamOutlined />, label: <Link to="/workers">Сотрудники</Link> },
         { key: '/competencies', icon: <AppstoreOutlined />, label: <Link to="/competencies">Компетенции</Link> },
         { key: '/assessments', icon: <RiseOutlined />, label: assessmentsLabel },
+        { key: '/admin/assessments', icon: <SolutionOutlined />, label: <Link to="/admin/assessments">Кампании</Link> },
+        { key: '/interpretations', icon: <FileTextOutlined />, label: <Link to="/interpretations">Интерпретации</Link> },
+        { key: '/my-results', icon: <BarChartOutlined />, label: <Link to="/my-results">Мои результаты</Link> },
         { key: '/development', icon: <RiseOutlined />, label: 'Развитие', disabled: true },
         { key: '/calendar', icon: <CalendarOutlined />, label: 'Календарь', disabled: true },
         { key: '/reports', icon: <BarChartOutlined />, label: 'Отчёты', disabled: true },
@@ -69,6 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         { key: '/workers', icon: <TeamOutlined />, label: <Link to="/workers">Сотрудники</Link> },
         { key: '/competencies', icon: <AppstoreOutlined />, label: <Link to="/competencies">Компетенции</Link> },
         { key: '/assessments', icon: <RiseOutlined />, label: assessmentsLabel },
+        { key: '/my-results', icon: <BarChartOutlined />, label: <Link to="/my-results">Мои результаты</Link> },
         { key: '/development', icon: <RiseOutlined />, label: 'Развитие', disabled: true },
       ];
 
