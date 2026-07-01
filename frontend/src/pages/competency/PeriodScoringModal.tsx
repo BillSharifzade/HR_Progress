@@ -25,10 +25,10 @@ import { CommentModal } from './CommentModal';
 
 const { Text } = Typography;
 
-// Critical (key) competencies are shown in purple; red is reserved for the
+// Critical (key) competencies are shown with purple text only (no row
+// background — it read as white in dark theme). Red is reserved for the
 // >4 divergence flag (two role marks disagreeing by more than 4 points).
 const CRITICAL_COLOR = '#722ed1';
-const CRITICAL_BG = '#f9f0ff';
 
 const ASSESSOR_ROLES = ['HEAD', 'DEPT_HEAD', 'HRA', 'DCR_HEAD'] as const;
 type AssessorRole = typeof ASSESSOR_ROLES[number];
@@ -141,9 +141,6 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
   const hasNextEmp = empIdx >= 0 && empIdx < employees.length - 1;
   const goPrevEmp = () => { if (hasPrevEmp) setSelectedEmployeeId(employees[empIdx - 1].id); };
   const goNextEmp = () => { if (hasNextEmp) setSelectedEmployeeId(employees[empIdx + 1].id); };
-
-  const isCriticalRow = (compId: string) =>
-    employeeGradeLevel !== null && !!reqLookup[compId]?.[employeeGradeLevel]?.is_key;
 
   // Divergence: any two entered role marks for this competency differ by >4.
   const isDivergentRow = (compId: string) => {
@@ -296,12 +293,6 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
             ) : (
               <>
                 <style>{`
-                  .scoring-row-critical > td {
-                    background: ${CRITICAL_BG} !important;
-                  }
-                  .scoring-row-critical > td:first-child {
-                    box-shadow: inset 3px 0 0 ${CRITICAL_COLOR};
-                  }
                   .scoring-row-divergent > td {
                     background: ${token.colorErrorBg} !important;
                   }
@@ -316,11 +307,7 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
                   size="small"
                   scroll={{ x: 700 }}
                   rowClassName={row =>
-                    isDivergentRow(row.competency_id)
-                      ? 'scoring-row-divergent'
-                      : isCriticalRow(row.competency_id)
-                        ? 'scoring-row-critical'
-                        : ''
+                    isDivergentRow(row.competency_id) ? 'scoring-row-divergent' : ''
                   }
                 />
               </>
