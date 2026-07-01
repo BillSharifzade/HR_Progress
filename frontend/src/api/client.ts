@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
 
-const API_BASE = '/api/v1';
+const API_BASE = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/api/v1`;
 
 let accessToken: string | null = null;
 let onUnauthorized: (() => void) | null = null;

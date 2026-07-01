@@ -182,7 +182,7 @@ export type AssessorRole = 'HEAD' | 'DEPT_HEAD' | 'HRA' | 'DCR_HEAD';
 export const AssessorRoleLabel: Record<AssessorRole, string> = {
   HEAD:      'Рук. отдела',
   DEPT_HEAD: 'Рук. дпт',
-  HRA:       'HR-аналитик',
+  HRA:       'Ассессор',
   DCR_HEAD:  'Рук. ДЧР',
 };
 
@@ -354,6 +354,7 @@ export interface EmployeeResult {
   competency_name: string;
   avg_score: number;
   published_at?: string | null;
+  divergent: boolean;
 }
 
 export type UserRole =
@@ -393,7 +394,7 @@ export type ParticipantRole = 'HEAD' | 'DEPT_HEAD' | 'HRA' | 'DCR_HEAD' | 'ASSES
 export const ParticipantRoleLabel: Record<ParticipantRole, string> = {
   HEAD:      'Рук. отдела',
   DEPT_HEAD: 'Рук. дпт',
-  HRA:       'HR-аналитик',
+  HRA:       'Ассессор',
   DCR_HEAD:  'Рук. ДЧР',
   ASSESSOR:  'Ассессор',
 };

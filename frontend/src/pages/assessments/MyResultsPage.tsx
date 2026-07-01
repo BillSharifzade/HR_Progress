@@ -1,4 +1,4 @@
-import { Card, Empty, Progress, Space, Table, Tag, Typography } from 'antd';
+import { Card, Empty, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 
@@ -42,7 +42,19 @@ export function MyResultsPage() {
               <Table
                 rowKey="competency_id" size="small" pagination={false} dataSource={rows}
                 columns={[
-                  { title: 'Компетенция', dataIndex: 'competency_name', key: 'name' },
+                  {
+                    title: 'Компетенция', dataIndex: 'competency_name', key: 'name',
+                    render: (name: string, r: EmployeeResult) => (
+                      <Space size={6}>
+                        <Text>{name}</Text>
+                        {r.divergent && (
+                          <Tooltip title="Расхождение оценок между ролями более 4 баллов">
+                            <Tag color="red">Расхождение</Tag>
+                          </Tooltip>
+                        )}
+                      </Space>
+                    ),
+                  },
                   {
                     title: 'Итоговый балл', dataIndex: 'avg_score', key: 'avg', width: 280,
                     render: (a: number) => (

@@ -22,6 +22,10 @@ type Config struct {
 	BootstrapAdminPassword string
 	CORSAllowedOrigins string
 
+	// BasePath is the URL path prefix the app is served under (e.g. "/progress"
+	// when co-hosted on a shared domain). Empty means served at root.
+	BasePath string
+
 	// 1F (Первая форма) integration. Empty BaseURL disables the scheduler.
 	OneFBaseURL      string
 	OneFAuthToken    string
@@ -38,6 +42,7 @@ func Load() (*Config, error) {
 		BootstrapAdminUsername: env("BOOTSTRAP_ADMIN_USERNAME", "admin"),
 		BootstrapAdminPassword: env("BOOTSTRAP_ADMIN_PASSWORD", "admin"),
 		CORSAllowedOrigins: env("CORS_ALLOWED_ORIGINS", "*"),
+		BasePath:           env("BASE_PATH", ""),
 	}
 
 	if c.DatabaseURL == "" {

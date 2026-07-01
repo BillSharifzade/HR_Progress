@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Empty, Input, InputNumber, List, Space, Spin, Tabs, Tag, Tooltip,
   Typography, message,
 } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, StarFilled } from '@ant-design/icons';
+import { ArrowLeftOutlined, SaveOutlined, StarFilled, CommentOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
@@ -12,8 +12,8 @@ import { PageHeader } from '../../components/PageHeader';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import {
   listMyAssessmentPeriods, listEmployees, listRequirements, listMyScoresIn, upsertScore,
-  lookupInterpretation,
 } from '../../api/competency';
+import { CommentModal } from '../competency/CommentModal';
 import type { Employee, ParticipantRole } from '../../types';
 import { ParticipantRoleLabel } from '../../types';
 import { useAuth } from '../../auth/useAuth';
@@ -130,23 +130,13 @@ export function MyPeriodScoringPage() {
   const [draft, setDraft] = useState<Record<string, number | null>>({});
   // Final interpretation text edits (FR-AS7.2.2), keyed like scores.
   const [draftText, setDraftText] = useState<Record<string, string>>({});
-  // Auto-interpretation cache keyed `${wid}:${cid}:${score}` (FR-AS7.2.1).
-  const [autoInterp, setAutoInterp] = useState<Record<string, { found: boolean; text: string }>>({});
 
   const scoreKey = (wid: string, cid: string, role: ParticipantRole) => `${wid}:${cid}:${role}`;
-  const interpKey = (wid: string, cid: string, score: number) => `${wid}:${cid}:${score}`;
 
-  // Fetch and cache the system interpretation for a (worker, competency, score).
-  const fetchInterp = async (wid: string, cid: string, score: number) => {
-    const k = interpKey(wid, cid, score);
-    if (k in autoInterp) return;
-    try {
-      const r = await lookupInterpretation(wid, cid, score);
-      setAutoInterp(prev => ({ ...prev, [k]: { found: r.found, text: r.text ?? '' } }));
-    } catch {
-      setAutoInterp(prev => ({ ...prev, [k]: { found: false, text: '' } }));
-    }
-  };
+  // Competency whose comment modal is open (role = activeRole), and auto-open
+  // tracking so the modal pops once per committed mark value.
+  const [commentComp, setCommentComp] = useState<string | null>(null);
+  const autoOpened = useRef<Record<string, number>>({});
 
   const currentText = (cid: string): string => {
     if (!selectedWorker || !activeRole) return '';
@@ -157,17 +147,6 @@ export function MyPeriodScoringPage() {
     );
     return existing?.feedback ?? '';
   };
-
-  // Prefetch interpretations for already-saved scores of the selected worker.
-  useEffect(() => {
-    if (!selectedWorker || !activeRole) return;
-    for (const s of myScores) {
-      if (s.employee_id === selectedWorker.id && s.assessor_role === activeRole && s.score != null) {
-        void fetchInterp(selectedWorker.id, s.competency_id, Math.round(s.score));
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedWorkerId, activeRole, myScores]);
 
   const currentScore = (cid: string): number | null => {
     if (!selectedWorker || !activeRole) return null;
@@ -186,11 +165,12 @@ export function MyPeriodScoringPage() {
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    if (!periodId || dirtyKeys.length === 0) return;
+    if (!periodId) return;
+    // Union of keys that changed score or comment text.
+    const keys = new Set<string>([...dirtyKeys, ...Object.keys(draftText)]);
+    if (keys.size === 0) return;
     setSaving(true);
     try {
-      // Union of keys that changed score or interpretation text.
-      const keys = new Set<string>([...dirtyKeys, ...Object.keys(draftText)]);
       for (const k of keys) {
         const [wid, cid, role] = k.split(':');
         const scoreVal = k in draft
@@ -212,12 +192,17 @@ export function MyPeriodScoringPage() {
     }
   };
 
+  const workerIdx = selectedWorker
+    ? filteredWorkers.findIndex(w => w.id === selectedWorker.id)
+    : -1;
+  const hasPrevWorker = workerIdx > 0;
+  const hasNextWorker = workerIdx >= 0 && workerIdx < filteredWorkers.length - 1;
+
+  const goPrevWorker = () => {
+    if (hasPrevWorker) setSelectedWorkerId(filteredWorkers[workerIdx - 1].id);
+  };
   const goNextWorker = () => {
-    if (!selectedWorker) return;
-    const idx = filteredWorkers.findIndex(w => w.id === selectedWorker.id);
-    if (idx >= 0 && idx < filteredWorkers.length - 1) {
-      setSelectedWorkerId(filteredWorkers[idx + 1].id);
-    }
+    if (hasNextWorker) setSelectedWorkerId(filteredWorkers[workerIdx + 1].id);
   };
 
   if (loadingPeriods) return <PageSkeleton type="profile" />;
@@ -354,7 +339,10 @@ export function MyPeriodScoringPage() {
                       >
                         Сохранить ({pendingCount})
                       </Button>
-                      <Button size="small" onClick={goNextWorker}>
+                      <Button size="small" onClick={goPrevWorker} disabled={!hasPrevWorker}>
+                        ← Предыдущий
+                      </Button>
+                      <Button size="small" onClick={goNextWorker} disabled={!hasNextWorker}>
                         Следующий →
                       </Button>
                     </Space>
@@ -380,11 +368,11 @@ export function MyPeriodScoringPage() {
                             const req = reqLookup[c.competency_id]?.[grade];
                             const sc = currentScore(c.competency_id);
                             const wid = selectedWorker.id;
-                            const interp = sc != null ? autoInterp[interpKey(wid, c.competency_id, Math.round(sc))] : undefined;
-                            const text = currentText(c.competency_id);
+                            const hasComment = !!currentText(c.competency_id);
+                            const key = activeRole ? scoreKey(wid, c.competency_id, activeRole) : '';
+                            const openComment = () => setCommentComp(c.competency_id);
                             return (
-                              <Fragment key={c.competency_id}>
-                              <tr style={{ borderBottom: text || sc != null ? 'none' : '1px solid #f5f5f5' }}>
+                              <tr key={c.competency_id} style={{ borderBottom: '1px solid #f5f5f5' }}>
                                 <td style={{ padding: '8px 4px' }}>
                                   <Space size={4}>
                                     <Tag color={c.kind === 'LK' ? 'blue' : c.kind === 'UK' ? 'purple' : 'gold'} style={{ fontSize: 10 }}>
@@ -393,7 +381,7 @@ export function MyPeriodScoringPage() {
                                     <Text>{c.competency_name}</Text>
                                     {req?.is_key && (
                                       <Tooltip title="Ключевая компетенция">
-                                        <StarFilled style={{ color: '#faad14', fontSize: 12 }} />
+                                        <StarFilled style={{ color: '#722ed1', fontSize: 12 }} />
                                       </Tooltip>
                                     )}
                                   </Space>
@@ -406,74 +394,41 @@ export function MyPeriodScoringPage() {
                                   )}
                                 </td>
                                 <td style={{ textAlign: 'center', padding: '8px 4px' }}>
-                                  <InputNumber
-                                    min={1}
-                                    max={10}
-                                    step={0.1}
-                                    precision={1}
-                                    value={sc ?? undefined}
-                                    placeholder="1–10"
-                                    style={{ width: 90 }}
-                                    onChange={(v) => {
-                                      if (!selectedWorker || !activeRole) return;
-                                      setDraft(d => ({
-                                        ...d,
-                                        [scoreKey(selectedWorker.id, c.competency_id, activeRole)]: v ?? null,
-                                      }));
-                                      if (v != null) void fetchInterp(selectedWorker.id, c.competency_id, Math.round(v));
-                                    }}
-                                  />
-                                </td>
-                              </tr>
-                              {sc != null && (
-                                <tr style={{ borderBottom: '1px solid #f5f5f5' }}>
-                                  <td colSpan={3} style={{ padding: '0 4px 10px 4px' }}>
-                                    {interp?.found && (
-                                      <Alert
-                                        type="info"
-                                        showIcon
-                                        style={{ marginBottom: 6, fontSize: 12 }}
-                                        message="Системная интерпретация"
-                                        description={<span style={{ fontSize: 12 }}>{interp.text}</span>}
-                                        action={
-                                          <Button
-                                            size="small"
-                                            type="link"
-                                            onClick={() => {
-                                              if (!activeRole) return;
-                                              setDraftText(d => ({
-                                                ...d,
-                                                [scoreKey(wid, c.competency_id, activeRole)]: interp.text,
-                                              }));
-                                            }}
-                                          >
-                                            Использовать
-                                          </Button>
-                                        }
-                                      />
-                                    )}
-                                    {interp && !interp.found && (
-                                      <Text type="secondary" style={{ fontSize: 11 }}>
-                                        Для выбранной оценки текстовая интерпретация не настроена.
-                                      </Text>
-                                    )}
-                                    <Input.TextArea
-                                      placeholder="Комментарий / итоговая интерпретация"
-                                      autoSize={{ minRows: 1, maxRows: 4 }}
-                                      value={text}
-                                      style={{ marginTop: 4, fontSize: 12 }}
-                                      onChange={(e) => {
-                                        if (!activeRole) return;
-                                        setDraftText(d => ({
+                                  <Space size={2}>
+                                    <InputNumber
+                                      min={1}
+                                      max={10}
+                                      step={0.1}
+                                      precision={1}
+                                      controls={false}
+                                      value={sc ?? undefined}
+                                      placeholder="1–10"
+                                      style={{ width: 64 }}
+                                      onChange={(v) => {
+                                        if (!selectedWorker || !activeRole) return;
+                                        setDraft(d => ({
                                           ...d,
-                                          [scoreKey(wid, c.competency_id, activeRole)]: e.target.value,
+                                          [scoreKey(selectedWorker.id, c.competency_id, activeRole)]: v ?? null,
                                         }));
                                       }}
+                                      onBlur={() => {
+                                        if (sc != null && key && autoOpened.current[key] !== sc) {
+                                          autoOpened.current[key] = sc;
+                                          openComment();
+                                        }
+                                      }}
                                     />
-                                  </td>
-                                </tr>
-                              )}
-                              </Fragment>
+                                    <Tooltip title={hasComment ? 'Комментарий задан' : 'Добавить комментарий'}>
+                                      <Button
+                                        type="text" size="small"
+                                        icon={<CommentOutlined style={{ color: hasComment ? '#1F5EFF' : '#bfbfbf' }} />}
+                                        onClick={openComment}
+                                        disabled={sc == null}
+                                      />
+                                    </Tooltip>
+                                  </Space>
+                                </td>
+                              </tr>
                             );
                           })}
                         </tbody>
@@ -486,6 +441,33 @@ export function MyPeriodScoringPage() {
               <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
             ),
           }))}
+        />
+      )}
+
+      {commentComp && selectedWorker && activeRole && (
+        <CommentModal
+          open={!!commentComp}
+          onClose={() => setCommentComp(null)}
+          isAdmin={user?.roles.includes('HR_ADMIN') ?? false}
+          workerId={selectedWorker.id}
+          competencyId={commentComp}
+          competencyName={competencyRows.find(c => c.competency_id === commentComp)?.competency_name ?? ''}
+          deptId={deptId}
+          gradeId={selectedWorker.grade_id ?? null}
+          initialRole={activeRole}
+          entries={[{
+            role: activeRole,
+            score: currentScore(commentComp),
+            feedback: currentText(commentComp),
+            editable: true,
+          }]}
+          onSave={(edits) => {
+            setDraftText(d => {
+              const next = { ...d };
+              for (const e of edits) next[scoreKey(selectedWorker.id, commentComp, e.role)] = e.feedback;
+              return next;
+            });
+          }}
         />
       )}
     </>

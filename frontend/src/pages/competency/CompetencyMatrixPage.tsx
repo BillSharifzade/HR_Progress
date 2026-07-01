@@ -23,7 +23,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, StarFilled, StarOutlined,
-  DownOutlined, RightOutlined, HolderOutlined,
+  DownOutlined, RightOutlined, HolderOutlined, RollbackOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -304,6 +304,10 @@ export function CompetencyMatrixPage() {
   // matrix inline editing
   const [matrixEditing, setMatrixEditing] = useState(false);
   const [matrixEditState, setMatrixEditState] = useState<Record<string, EditCell>>({});
+  // Competencies the admin removed from THIS department's matrix during edit.
+  // Excluded from the save payload; since UpsertRequirements is replace-all,
+  // they drop out of the dept matrix. Values are preserved so removal is undoable.
+  const [removedComps, setRemovedComps] = useState<Set<string>>(new Set());
   const [savingMatrix, setSavingMatrix] = useState(false);
 
   // period scoring modal
@@ -432,7 +436,16 @@ export function CompetencyMatrixPage() {
       };
     }
     setMatrixEditState(state);
+    setRemovedComps(new Set());
     setMatrixEditing(true);
+  };
+
+  const toggleRemoveComp = (compId: string) => {
+    setRemovedComps(prev => {
+      const next = new Set(prev);
+      if (next.has(compId)) next.delete(compId); else next.add(compId);
+      return next;
+    });
   };
 
   const saveMatrix = async () => {
@@ -444,7 +457,9 @@ export function CompetencyMatrixPage() {
         .map(([key, v]) => {
           const [competency_id, grade_id] = key.split(':');
           return { competency_id, grade_id, required_min: v.required_min, is_key: v.is_key };
-        });
+        })
+        // Competencies removed from this dept's matrix are dropped on save.
+        .filter(p => !removedComps.has(p.competency_id));
       await upsertRequirements(selectedDeptId, payload);
       await loadDeptData(selectedDeptId);
       setMatrixEditing(false);
@@ -508,6 +523,32 @@ export function CompetencyMatrixPage() {
         );
       },
     })),
+    {
+      title: '',
+      key: 'remove',
+      width: 48,
+      align: 'center' as const,
+      render: (_: unknown, comp: Competency) => (
+        removedComps.has(comp.id) ? (
+          <Tooltip title="Вернуть в матрицу">
+            <Button type="text" size="small" icon={<RollbackOutlined />} onClick={() => toggleRemoveComp(comp.id)} />
+          </Tooltip>
+        ) : (
+          <Popconfirm
+            title="Убрать из матрицы департамента?"
+            description="Компетенция останется в каталоге, но будет удалена из матрицы этого департамента при сохранении."
+            okText="Убрать"
+            okButtonProps={{ danger: true }}
+            cancelText="Отмена"
+            onConfirm={() => toggleRemoveComp(comp.id)}
+          >
+            <Tooltip title="Убрать из матрицы">
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+            </Tooltip>
+          </Popconfirm>
+        )
+      ),
+    },
   ];
 
   // --- Competency CRUD ---
@@ -859,14 +900,18 @@ export function CompetencyMatrixPage() {
                 {loading ? (
                   <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
                 ) : matrixEditing ? (
-                  <Table
-                    dataSource={competencies}
-                    rowKey="id"
-                    columns={editMatrixColumns}
-                    pagination={false}
-                    size="small"
-                    scroll={{ x: 800 }}
-                  />
+                  <>
+                    <style>{`.matrix-row-removed > td { opacity: 0.4; }`}</style>
+                    <Table
+                      dataSource={competencies}
+                      rowKey="id"
+                      columns={editMatrixColumns}
+                      pagination={false}
+                      size="small"
+                      scroll={{ x: 800 }}
+                      rowClassName={comp => (removedComps.has(comp.id) ? 'matrix-row-removed' : '')}
+                    />
+                  </>
                 ) : selectedDeptId && tableRows.length === 0 ? (
                   <Alert type="info" message="Нет данных требований для выбранного департамента" />
                 ) : (

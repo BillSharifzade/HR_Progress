@@ -468,6 +468,9 @@ type EmployeeResult struct {
 	CompetencyName string    `json:"competency_name"`
 	AvgScore       float64   `json:"avg_score"`
 	PublishedAt    *string   `json:"published_at,omitempty"`
+	// Divergent is true when any two role marks (HEAD/DEPT_HEAD/HRA/DCR_HEAD)
+	// for this cell differ by more than 4 (assessment disagreement flag).
+	Divergent bool `json:"divergent"`
 }
 
 // MyPublishedResults returns the employee's consolidated results from published
@@ -475,7 +478,16 @@ type EmployeeResult struct {
 func (r *Repository) MyPublishedResults(ctx context.Context, userID uuid.UUID) ([]EmployeeResult, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT ac.period_id, p.title, ac.competency_id, c.name, ac.avg_score,
-		       to_char(p.published_at, 'YYYY-MM-DD')
+		       to_char(p.published_at, 'YYYY-MM-DD'),
+		       COALESCE((
+		         SELECT MAX(s.score) - MIN(s.score) > 4
+		           FROM assessment_scores s
+		          WHERE s.period_id = ac.period_id
+		            AND s.employee_id = ac.employee_id
+		            AND s.competency_id = ac.competency_id
+		            AND s.assessor_role IN ('HEAD','DEPT_HEAD','HRA','DCR_HEAD')
+		            AND s.score IS NOT NULL
+		       ), false)
 		FROM assessment_consolidated ac
 		JOIN assessment_periods p ON p.id = ac.period_id
 		JOIN competencies c ON c.id = ac.competency_id
@@ -489,7 +501,7 @@ func (r *Repository) MyPublishedResults(ctx context.Context, userID uuid.UUID) (
 	for rows.Next() {
 		var e EmployeeResult
 		if err := rows.Scan(&e.PeriodID, &e.PeriodTitle, &e.CompetencyID, &e.CompetencyName,
-			&e.AvgScore, &e.PublishedAt); err != nil {
+			&e.AvgScore, &e.PublishedAt, &e.Divergent); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

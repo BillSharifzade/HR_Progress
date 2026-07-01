@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Modal,
   Select,
@@ -14,15 +14,21 @@ import {
   theme as antdTheme,
   message,
 } from 'antd';
-import { StarFilled } from '@ant-design/icons';
+import { StarFilled, LeftOutlined, RightOutlined, CommentOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 
 import { listEmployees, getPeriodWithScores, upsertScoresBulk } from '../../api/competency';
-import type { AssessmentPeriod, AssessmentScore, Employee, Requirement } from '../../types';
+import type { AssessmentPeriod, AssessmentScore, Employee, Requirement, ParticipantRole } from '../../types';
 import { AssessorRoleLabel } from '../../types';
+import { CommentModal } from './CommentModal';
 
 const { Text } = Typography;
+
+// Critical (key) competencies are shown in purple; red is reserved for the
+// >4 divergence flag (two role marks disagreeing by more than 4 points).
+const CRITICAL_COLOR = '#722ed1';
+const CRITICAL_BG = '#f9f0ff';
 
 const ASSESSOR_ROLES = ['HEAD', 'DEPT_HEAD', 'HRA', 'DCR_HEAD'] as const;
 type AssessorRole = typeof ASSESSOR_ROLES[number];
@@ -45,6 +51,9 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [allScores, setAllScores] = useState<AssessmentScore[]>([]);
   const [scores, setScores] = useState<Record<string, number | null>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [commentCell, setCommentCell] = useState<{ competencyId: string; role: AssessorRole } | null>(null);
+  const autoOpened = useRef<Record<string, number>>({});
   const [loadingData, setLoadingData] = useState(false);
   const [saving, setSaving] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
@@ -86,12 +95,17 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
 
   // Populate score grid when employee is selected
   useEffect(() => {
-    if (!selectedEmployeeId) { setScores({}); return; }
+    if (!selectedEmployeeId) { setScores({}); setComments({}); return; }
     const state: Record<string, number | null> = {};
+    const cstate: Record<string, string> = {};
     for (const s of allScores.filter(s => s.employee_id === selectedEmployeeId)) {
-      state[`${s.competency_id}:${s.assessor_role}`] = s.score;
+      const key = `${s.competency_id}:${s.assessor_role}`;
+      state[key] = s.score;
+      cstate[key] = s.feedback ?? '';
     }
     setScores(state);
+    setComments(cstate);
+    autoOpened.current = {};
   }, [selectedEmployeeId, allScores]);
 
   const handleSave = async () => {
@@ -102,7 +116,10 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
         .filter(([, v]) => v !== null)
         .map(([key, score]) => {
           const [competency_id, assessor_role] = key.split(':');
-          return { employee_id: selectedEmployeeId, competency_id, assessor_role, score: score as number };
+          return {
+            employee_id: selectedEmployeeId, competency_id, assessor_role,
+            score: score as number, feedback: comments[key] ?? null,
+          };
         });
       await upsertScoresBulk(period.id, payload);
       // Refresh stored scores so re-selecting the employee shows saved values
@@ -119,8 +136,23 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId) ?? null;
   const employeeGradeLevel = selectedEmployee?.grade_level ?? null;
 
+  const empIdx = selectedEmployeeId ? employees.findIndex(e => e.id === selectedEmployeeId) : -1;
+  const hasPrevEmp = empIdx > 0;
+  const hasNextEmp = empIdx >= 0 && empIdx < employees.length - 1;
+  const goPrevEmp = () => { if (hasPrevEmp) setSelectedEmployeeId(employees[empIdx - 1].id); };
+  const goNextEmp = () => { if (hasNextEmp) setSelectedEmployeeId(employees[empIdx + 1].id); };
+
   const isCriticalRow = (compId: string) =>
     employeeGradeLevel !== null && !!reqLookup[compId]?.[employeeGradeLevel]?.is_key;
+
+  // Divergence: any two entered role marks for this competency differ by >4.
+  const isDivergentRow = (compId: string) => {
+    const vals = ASSESSOR_ROLES
+      .map(role => scores[`${compId}:${role}`])
+      .filter((v): v is number => v != null);
+    if (vals.length < 2) return false;
+    return Math.max(...vals) - Math.min(...vals) > 4;
+  };
 
   const columns: ColumnsType<DeptComp> = [
     {
@@ -132,18 +164,24 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
           : undefined;
         const reqMin = req?.required_min;
         const isKey = !!req?.is_key;
+        const divergent = isDivergentRow(row.competency_id);
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {isKey && (
               <Tooltip title="Ключевая компетенция">
-                <StarFilled style={{ color: token.colorError, fontSize: 14, flexShrink: 0 }} />
+                <StarFilled style={{ color: CRITICAL_COLOR, fontSize: 14, flexShrink: 0 }} />
               </Tooltip>
             )}
-            <Text strong style={{ fontSize: 13, color: isKey ? token.colorError : undefined }}>
+            <Text strong style={{ fontSize: 13, color: isKey ? CRITICAL_COLOR : undefined }}>
               {name}
             </Text>
             {reqMin !== undefined && reqMin !== null && (
               <Text type="secondary" style={{ fontSize: 11 }}>min {reqMin}</Text>
+            )}
+            {divergent && (
+              <Tooltip title="Расхождение оценок между ролями более 4 баллов">
+                <Tag color="red" style={{ fontSize: 10, marginInlineStart: 'auto' }}>Расхождение</Tag>
+              </Tooltip>
             )}
           </div>
         );
@@ -152,18 +190,38 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
     ...ASSESSOR_ROLES.map((role: AssessorRole) => ({
       title: <div style={{ fontSize: 11, textAlign: 'center', lineHeight: 1.3 }}>{AssessorRoleLabel[role]}</div>,
       key: role,
-      width: 90,
+      width: 112,
       align: 'center' as const,
       render: (_: unknown, row: DeptComp) => {
         const key = `${row.competency_id}:${role}`;
+        const hasComment = !!comments[key];
+        const openComment = () => setCommentCell({ competencyId: row.competency_id, role });
         return (
-          <InputNumber
-            value={scores[key] ?? null}
-            onChange={val => setScores(prev => ({ ...prev, [key]: val as number | null }))}
-            min={0} max={10} size="small" style={{ width: 64 }}
-            placeholder="—"
-            disabled={!selectedEmployeeId}
-          />
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            <InputNumber
+              value={scores[key] ?? null}
+              onChange={val => setScores(prev => ({ ...prev, [key]: val as number | null }))}
+              onBlur={() => {
+                const v = scores[key];
+                if (v != null && autoOpened.current[key] !== v) {
+                  autoOpened.current[key] = v;
+                  openComment();
+                }
+              }}
+              controls={false}
+              min={0} max={10} step={0.1} size="small" style={{ width: 52 }}
+              placeholder="—"
+              disabled={!selectedEmployeeId}
+            />
+            <Tooltip title={hasComment ? 'Комментарий задан' : 'Добавить комментарий'}>
+              <Button
+                type="text" size="small"
+                icon={<CommentOutlined style={{ color: hasComment ? token.colorPrimary : token.colorTextQuaternary }} />}
+                onClick={openComment}
+                disabled={!selectedEmployeeId}
+              />
+            </Tooltip>
+          </div>
         );
       },
     })),
@@ -224,6 +282,12 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
                   }))}
                   notFoundContent="Нет сотрудников в департаменте"
                 />
+                <Tooltip title="Предыдущий сотрудник">
+                  <Button icon={<LeftOutlined />} onClick={goPrevEmp} disabled={!hasPrevEmp} />
+                </Tooltip>
+                <Tooltip title="Следующий сотрудник">
+                  <Button icon={<RightOutlined />} onClick={goNextEmp} disabled={!hasNextEmp} />
+                </Tooltip>
               </Space>
             </div>
 
@@ -233,9 +297,15 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
               <>
                 <style>{`
                   .scoring-row-critical > td {
-                    background: ${token.colorErrorBg} !important;
+                    background: ${CRITICAL_BG} !important;
                   }
                   .scoring-row-critical > td:first-child {
+                    box-shadow: inset 3px 0 0 ${CRITICAL_COLOR};
+                  }
+                  .scoring-row-divergent > td {
+                    background: ${token.colorErrorBg} !important;
+                  }
+                  .scoring-row-divergent > td:first-child {
                     box-shadow: inset 3px 0 0 ${token.colorError};
                   }
                 `}</style>
@@ -245,13 +315,46 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
                   pagination={false}
                   size="small"
                   scroll={{ x: 700 }}
-                  rowClassName={row => (isCriticalRow(row.competency_id) ? 'scoring-row-critical' : '')}
+                  rowClassName={row =>
+                    isDivergentRow(row.competency_id)
+                      ? 'scoring-row-divergent'
+                      : isCriticalRow(row.competency_id)
+                        ? 'scoring-row-critical'
+                        : ''
+                  }
                 />
               </>
             )}
           </>
         )}
       </Modal>
+
+      {commentCell && (
+        <CommentModal
+          open={!!commentCell}
+          onClose={() => setCommentCell(null)}
+          isAdmin
+          workerId={selectedEmployeeId!}
+          competencyId={commentCell.competencyId}
+          competencyName={deptComps.find(d => d.competency_id === commentCell.competencyId)?.competency_name ?? ''}
+          deptId={deptId}
+          gradeId={selectedEmployee?.grade_id ?? null}
+          initialRole={commentCell.role as ParticipantRole}
+          entries={ASSESSOR_ROLES.map(role => ({
+            role: role as ParticipantRole,
+            score: scores[`${commentCell.competencyId}:${role}`] ?? null,
+            feedback: comments[`${commentCell.competencyId}:${role}`] ?? '',
+            editable: true,
+          }))}
+          onSave={(edits) => {
+            setComments(prev => {
+              const next = { ...prev };
+              for (const e of edits) next[`${commentCell.competencyId}:${e.role}`] = e.feedback;
+              return next;
+            });
+          }}
+        />
+      )}
     </>
   );
 }

@@ -19,14 +19,16 @@ type Handler struct {
 	validate *validator.Validate
 	cookieSecure bool
 	refreshTTL   time.Duration
+	basePath     string
 }
 
-func NewHandler(svc *Service, refreshTTL time.Duration, cookieSecure bool) *Handler {
+func NewHandler(svc *Service, refreshTTL time.Duration, cookieSecure bool, basePath string) *Handler {
 	return &Handler{
 		svc: svc,
 		validate: validator.New(validator.WithRequiredStructEnabled()),
 		cookieSecure: cookieSecure,
 		refreshTTL: refreshTTL,
+		basePath: basePath,
 	}
 }
 
@@ -106,7 +108,7 @@ func (h *Handler) setRefreshCookie(w http.ResponseWriter, value string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    value,
-		Path:     "/api/v1/auth",
+		Path:     h.basePath + "/api/v1/auth",
 		HttpOnly: true,
 		Secure:   h.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
@@ -118,7 +120,7 @@ func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    "",
-		Path:     "/api/v1/auth",
+		Path:     h.basePath + "/api/v1/auth",
 		HttpOnly: true,
 		Secure:   h.cookieSecure,
 		SameSite: http.SameSiteLaxMode,

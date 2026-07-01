@@ -38,10 +38,13 @@ services:
       ONEF_BASE_URL: ${ONEF_BASE_URL:-}
       ONEF_AUTH_TOKEN: ${ONEF_AUTH_TOKEN:-}
       ONEF_SYNC_INTERVAL: ${ONEF_SYNC_INTERVAL:-24h}
+      BASE_PATH: ${BASE_PATH:-}
 
   web:
     build:
       context: ../frontend
+      args:
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
     restart: unless-stopped
     depends_on:
       - api

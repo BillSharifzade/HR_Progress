@@ -65,7 +65,7 @@ func main() {
 	authRepo := auth.NewRepository(pool)
 	jwtIssuer := auth.NewJWTIssuer(cfg.JWTSecret, cfg.AccessTokenTTL)
 	authSvc := auth.NewService(pool, authRepo, jwtIssuer, auditWriter, cfg.RefreshTokenTTL)
-	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv == "production")
+	authHandler := auth.NewHandler(authSvc, cfg.RefreshTokenTTL, cfg.AppEnv == "production", cfg.BasePath)
 
 	compRepo := competency.NewRepository(pool)
 	compSvc := competency.NewService(compRepo)
