@@ -7,6 +7,7 @@ import { ArrowLeftOutlined, ReloadOutlined, TeamOutlined } from '@ant-design/ico
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import dayjs from 'dayjs';
+import { formatPeriodRange } from '../../utils/period';
 
 import { PageHeader } from '../../components/PageHeader';
 import { PageSkeleton } from '../../components/PageSkeleton';
@@ -64,7 +65,7 @@ export function CampaignDetailPage() {
           <Space wrap>
             <Tag color={CampaignStatusColor[status]}>{CampaignStatusLabel[status]}</Tag>
             <Text type="secondary">
-              {dayjs(period.period_start).format('DD.MM.YYYY')} — {dayjs(period.period_end).format('DD.MM.YYYY')}
+              {formatPeriodRange(period.period_start, period.period_end)}
             </Text>
             <Text type="secondary">Размер группы: {period.group_size}</Text>
           </Space>

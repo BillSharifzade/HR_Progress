@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
+import { formatPeriodRange } from '../../utils/period';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -835,7 +836,7 @@ export function CompetencyMatrixPage() {
       title: 'Период',
       key: 'period',
       render: (_: unknown, r: AssessmentPeriod) =>
-        `${dayjs(r.period_start).format('DD.MM.YYYY')} — ${dayjs(r.period_end).format('DD.MM.YYYY')}`,
+        formatPeriodRange(r.period_start, r.period_end),
     },
     {
       title: 'Статус',

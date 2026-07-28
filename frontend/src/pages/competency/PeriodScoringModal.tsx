@@ -16,7 +16,7 @@ import {
 } from 'antd';
 import { StarFilled, LeftOutlined, RightOutlined, CommentOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import { formatPeriodRange } from '../../utils/period';
 
 import { listEmployees, getPeriodWithScores, upsertScoresBulk } from '../../api/competency';
 import type { AssessmentPeriod, AssessmentScore, Employee, Requirement, ParticipantRole } from '../../types';
@@ -252,7 +252,7 @@ export function PeriodScoringModal({ period, deptId, requirements, onClose }: Pr
           <div style={{ marginBottom: 16 }}>
             <Space>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {dayjs(period.period_start).format('DD.MM.YYYY')} — {dayjs(period.period_end).format('DD.MM.YYYY')}
+                {formatPeriodRange(period.period_start, period.period_end)}
               </Text>
               <Tag color={period.is_active ? 'green' : 'default'} style={{ fontSize: 11 }}>
                 {period.is_active ? 'Активен' : 'Завершён'}

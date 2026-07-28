@@ -5,7 +5,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import dayjs from 'dayjs';
+import { formatPeriodRange } from '../../utils/period';
 
 import { PageHeader } from '../../components/PageHeader';
 import { PageSkeleton } from '../../components/PageSkeleton';
@@ -68,7 +68,7 @@ export function CampaignsAdminPage() {
     {
       title: 'Период', key: 'period',
       render: (_: unknown, r: AssessmentPeriod) =>
-        `${dayjs(r.period_start).format('DD.MM.YYYY')} — ${dayjs(r.period_end).format('DD.MM.YYYY')}`,
+        formatPeriodRange(r.period_start, r.period_end),
     },
     { title: 'Размер группы', dataIndex: 'group_size', key: 'group_size', width: 130 },
     {

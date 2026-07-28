@@ -6,7 +6,7 @@ import {
 import { ArrowLeftOutlined, SaveOutlined, StarFilled, CommentOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import dayjs from 'dayjs';
+import { formatPeriodRange } from '../../utils/period';
 
 import { PageHeader } from '../../components/PageHeader';
 import { PageSkeleton } from '../../components/PageSkeleton';
@@ -227,7 +227,7 @@ export function MyPeriodScoringPage() {
         subtitle={
           <Space size={6} wrap>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {dayjs(period.period_start).format('DD.MM.YYYY')} — {dayjs(period.period_end).format('DD.MM.YYYY')}
+              {formatPeriodRange(period.period_start, period.period_end)}
             </Text>
             {period.department && (
               <Tag color="default" style={{ marginInlineStart: 8 }}>{period.department}</Tag>

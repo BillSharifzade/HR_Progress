@@ -171,8 +171,8 @@ func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, cre
 	if err != nil {
 		return Period{}, errors.New("invalid period_end date, expected YYYY-MM-DD")
 	}
-	if !end.After(start) {
-		return Period{}, errors.New("period_end must be after period_start")
+	if end.Before(start) {
+		return Period{}, errors.New("period_end must not be before period_start")
 	}
 
 	p := Period{
