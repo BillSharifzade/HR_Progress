@@ -281,8 +281,8 @@ type UpsertScoreRequest struct {
 	AssessorRole string    `json:"assessor_role" validate:"omitempty,oneof=HEAD DEPT_HEAD HRA DCR_HEAD ASSESSOR"`
 	// omitempty only skips a nil pointer here — a pointer to 0 still validates,
 	// so the bound has to be min=0 for a 0 mark to get through.
-	Score *float64 `json:"score" validate:"omitempty,min=0,max=10"`
-	Feedback     *string   `json:"feedback"`
+	Score    *float64 `json:"score" validate:"omitempty,min=0,max=10"`
+	Feedback *string  `json:"feedback"`
 }
 
 // Participant is one user assigned to score in a period.

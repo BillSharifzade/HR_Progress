@@ -45,6 +45,7 @@ import {
   listRequirements,
   listPeriods,
   createPeriod,
+  deletePeriod,
   createCompetency,
   updateCompetency,
   deleteCompetency,
@@ -174,6 +175,7 @@ function SortableCompetencyItem({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { token } = theme.useToken();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: comp.id });
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -201,7 +203,7 @@ function SortableCompetencyItem({
           onClick={e => e.stopPropagation()}
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 24, height: 28, color: 'rgba(0,0,0,0.35)',
+            width: 24, height: 28, color: token.colorTextTertiary,
             cursor: 'grab', touchAction: 'none', flexShrink: 0,
           }}
           title="Перетащите для изменения порядка"
@@ -290,6 +292,7 @@ export function CompetencyMatrixPage() {
   // period create modal
   const [createPeriodOpen, setCreatePeriodOpen] = useState(false);
   const [creatingPeriod, setCreatingPeriod] = useState(false);
+  const [deletingPeriodId, setDeletingPeriodId] = useState<string | null>(null);
   const [periodForm] = Form.useForm();
   const [periodAssessors, setPeriodAssessors] = useState<{ id: string; full_name: string }[]>([]);
 
@@ -513,8 +516,8 @@ export function CompetencyMatrixPage() {
             <Button
               type="text" size="small"
               icon={cell.is_key
-                ? <StarFilled style={{ color: '#faad14' }} />
-                : <StarOutlined style={{ color: '#bfbfbf' }} />}
+                ? <StarFilled style={{ color: token.colorWarning }} />
+                : <StarOutlined style={{ color: token.colorTextQuaternary }} />}
               onClick={() => setMatrixEditState(prev => ({
                 ...prev,
                 [key]: { ...(prev[key] ?? { required_min: null }), is_key: !cell.is_key },
@@ -778,7 +781,20 @@ export function CompetencyMatrixPage() {
     }
   };
 
-  // --- Period create ---
+  // --- Period create / delete ---
+
+  const handleDeletePeriod = async (id: string) => {
+    setDeletingPeriodId(id);
+    try {
+      await deletePeriod(id);
+      setPeriods(prev => prev.filter(p => p.id !== id));
+      messageApi.success('Период оценки удалён');
+    } catch (e: any) {
+      messageApi.error(e?.response?.data?.error?.message ?? 'Не удалось удалить период');
+    } finally {
+      setDeletingPeriodId(null);
+    }
+  };
 
   const handleCreatePeriod = async (values: {
     title: string;
@@ -849,6 +865,39 @@ export function CompetencyMatrixPage() {
       dataIndex: 'created_at',
       width: 160,
       render: (v: string) => dayjs(v).format('DD.MM.YYYY HH:mm'),
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 56,
+      // The row itself opens the scoring modal, so the delete control has to
+      // swallow the click before it bubbles up.
+      onCell: () => ({ onClick: (e: React.MouseEvent) => e.stopPropagation() }),
+      render: (_: unknown, r: AssessmentPeriod) =>
+        r.status === 'published' ? (
+          <Tooltip title="Опубликованный период удалить нельзя">
+            <Button type="text" size="small" danger disabled icon={<DeleteOutlined />} />
+          </Tooltip>
+        ) : (
+          <Popconfirm
+            title="Удалить период оценки?"
+            description="Оценки, участники и группы этого периода будут удалены безвозвратно."
+            okText="Удалить"
+            okButtonProps={{ danger: true }}
+            cancelText="Отмена"
+            onConfirm={() => handleDeletePeriod(r.id)}
+          >
+            <Tooltip title="Удалить период">
+              <Button
+                type="text"
+                size="small"
+                danger
+                loading={deletingPeriodId === r.id}
+                icon={<DeleteOutlined />}
+              />
+            </Tooltip>
+          </Popconfirm>
+        ),
     },
   ];
 

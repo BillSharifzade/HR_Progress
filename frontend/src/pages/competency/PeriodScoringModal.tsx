@@ -22,13 +22,15 @@ import { listEmployees, getPeriodWithScores, upsertScoresBulk } from '../../api/
 import type { AssessmentPeriod, AssessmentScore, Employee, Requirement, ParticipantRole } from '../../types';
 import { AssessorRoleLabel } from '../../types';
 import { CommentModal } from './CommentModal';
+import { criticalPurple } from '../../theme';
+import { useThemeMode } from '../../theme/ThemeContext';
 
 const { Text } = Typography;
 
 // Critical (key) competencies are shown with purple text only (no row
 // background — it read as white in dark theme). Red is reserved for the
 // >4 divergence flag (two role marks disagreeing by more than 4 points).
-const CRITICAL_COLOR = '#722ed1';
+// The purple itself is mode-dependent — see criticalPurple() in theme.ts.
 
 const ASSESSOR_ROLES = ['HEAD', 'DEPT_HEAD', 'HRA', 'DCR_HEAD'] as const;
 type AssessorRole = typeof ASSESSOR_ROLES[number];
@@ -47,6 +49,8 @@ interface Props {
 }
 
 export function PeriodScoringModal({ period, deptId, requirements, onClose }: Props) {
+  const { mode } = useThemeMode();
+  const CRITICAL_COLOR = criticalPurple(mode === 'dark');
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [allScores, setAllScores] = useState<AssessmentScore[]>([]);

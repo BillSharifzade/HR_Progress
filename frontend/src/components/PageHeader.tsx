@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Typography } from 'antd';
+import { Typography, theme } from 'antd';
 
 export function PageHeader({
   title,
@@ -10,6 +10,7 @@ export function PageHeader({
   subtitle?: ReactNode;
   extra?: ReactNode;
 }) {
+  const { token } = theme.useToken();
   return (
     <div
       style={{
@@ -26,7 +27,7 @@ export function PageHeader({
           {title}
         </Typography.Title>
         {subtitle && (
-          <div style={{ marginTop: 2, fontSize: 13, color: 'rgba(0,0,0,0.55)' }}>
+          <div style={{ marginTop: 2, fontSize: 13, color: token.colorTextSecondary }}>
             {subtitle}
           </div>
         )}

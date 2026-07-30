@@ -160,6 +160,7 @@ function AddHistoryDrawer({ workerId, onClose }: { workerId: string; onClose: ()
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 export function WorkerProfile() {
+  const { token } = antdTheme.useToken();
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -278,7 +279,7 @@ export function WorkerProfile() {
   ];
 
   const subtitle = (
-    <Space size={4} split={<span style={{ color: 'rgba(0,0,0,0.25)' }}>·</span>}>
+    <Space size={4} split={<span style={{ color: token.colorTextQuaternary }}>·</span>}>
       <Link to="/workers" style={{ color: 'inherit' }}>Сотрудники</Link>
       <span>{worker.full_name}</span>
     </Space>

@@ -19,6 +19,7 @@ import (
 	"hrprogress/internal/auth"
 	"hrprogress/internal/competency"
 	"hrprogress/internal/config"
+	"hrprogress/internal/dashboard"
 	"hrprogress/internal/db"
 	"hrprogress/internal/httpx"
 	"hrprogress/internal/onef"
@@ -71,6 +72,8 @@ func main() {
 	compSvc := competency.NewService(compRepo)
 	compHandler := competency.NewHandler(compSvc)
 
+	dashHandler := dashboard.NewHandler(dashboard.NewService(dashboard.NewRepository(pool)))
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -108,6 +111,7 @@ func main() {
 		compHandler.Mount(r, jwtIssuer)
 		workersHandler.Mount(r, jwtIssuer)
 		oneFHandler.Mount(r, jwtIssuer)
+		dashHandler.Mount(r, jwtIssuer)
 	})
 
 	srv := &http.Server{

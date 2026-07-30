@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { App, Button } from 'antd';
+import { App, Button, theme } from 'antd';
 import { BellOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -18,6 +18,7 @@ export function ActivePeriodNotifier() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { notification } = App.useApp();
+  const { token } = theme.useToken();
 
   const { data: periods = [] } = useQuery({
     queryKey: ['my-assessment-periods'],
@@ -42,7 +43,7 @@ export function ActivePeriodNotifier() {
       key: 'active-periods',  // dedupe in case StrictMode double-fires
       message: lead,
       description: 'Вы можете выставить оценки своим сотрудникам.',
-      icon: <BellOutlined style={{ color: '#1F5EFF' }} />,
+      icon: <BellOutlined style={{ color: token.colorPrimary }} />,
       btn: (
         <Button
           type="primary"

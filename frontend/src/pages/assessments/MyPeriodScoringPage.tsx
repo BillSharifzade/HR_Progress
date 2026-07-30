@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Card, Empty, Input, InputNumber, List, Space, Spin, Tabs, Tag, Tooltip,
-  Typography, message,
+  Typography, message, theme,
 } from 'antd';
 import { ArrowLeftOutlined, SaveOutlined, StarFilled, CommentOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +17,8 @@ import { CommentModal } from '../competency/CommentModal';
 import type { Employee, ParticipantRole } from '../../types';
 import { ParticipantRoleLabel } from '../../types';
 import { useAuth } from '../../auth/useAuth';
+import { criticalPurple } from '../../theme';
+import { useThemeMode } from '../../theme/ThemeContext';
 
 const { Text } = Typography;
 
@@ -33,6 +35,8 @@ export function MyPeriodScoringPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [msg, ctx] = message.useMessage();
+  const { token } = theme.useToken();
+  const { mode } = useThemeMode();
 
   // Period meta (from /me/assessment-periods/)
   const { data: myPeriods = [], isLoading: loadingPeriods } = useQuery({
@@ -313,8 +317,8 @@ export function MyPeriodScoringPage() {
                             style={{
                               cursor: 'pointer',
                               padding: '8px 12px',
-                              background: sel ? 'rgba(31,94,255,0.08)' : 'transparent',
-                              borderInlineStart: sel ? '3px solid #1F5EFF' : '3px solid transparent',
+                              background: sel ? token.controlItemBgActive : 'transparent',
+                              borderInlineStart: `3px solid ${sel ? token.colorPrimary : 'transparent'}`,
                             }}
                           >
                             <div style={{ width: '100%' }}>
@@ -371,7 +375,7 @@ export function MyPeriodScoringPage() {
                     <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #f0f0f0', fontSize: 12 }}>
+                          <tr style={{ borderBottom: `1px solid ${token.colorBorder}`, fontSize: 12 }}>
                             <th style={{ textAlign: 'left', padding: '8px 4px' }}>Компетенция</th>
                             <th style={{ width: 100, textAlign: 'center', padding: '8px 4px' }}>Мин.</th>
                             <th style={{ width: 140, textAlign: 'center', padding: '8px 4px' }}>Моя оценка</th>
@@ -387,7 +391,7 @@ export function MyPeriodScoringPage() {
                             const key = activeRole ? scoreKey(wid, c.competency_id, activeRole) : '';
                             const openComment = () => setCommentComp(c.competency_id);
                             return (
-                              <tr key={c.competency_id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                              <tr key={c.competency_id} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                                 <td style={{ padding: '8px 4px' }}>
                                   <Space size={4}>
                                     <Tag color={c.kind === 'LK' ? 'blue' : c.kind === 'UK' ? 'purple' : 'gold'} style={{ fontSize: 10 }}>
@@ -396,7 +400,7 @@ export function MyPeriodScoringPage() {
                                     <Text>{c.competency_name}</Text>
                                     {req?.is_key && (
                                       <Tooltip title="Ключевая компетенция">
-                                        <StarFilled style={{ color: '#722ed1', fontSize: 12 }} />
+                                        <StarFilled style={{ color: criticalPurple(mode === 'dark'), fontSize: 12 }} />
                                       </Tooltip>
                                     )}
                                   </Space>
@@ -436,7 +440,7 @@ export function MyPeriodScoringPage() {
                                     <Tooltip title={hasComment ? 'Комментарий задан' : 'Добавить комментарий'}>
                                       <Button
                                         type="text" size="small"
-                                        icon={<CommentOutlined style={{ color: hasComment ? '#1F5EFF' : '#bfbfbf' }} />}
+                                        icon={<CommentOutlined style={{ color: hasComment ? token.colorPrimary : token.colorTextQuaternary }} />}
                                         onClick={openComment}
                                         disabled={sc == null}
                                       />

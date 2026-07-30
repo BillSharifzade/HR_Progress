@@ -24,3 +24,16 @@ export const darkTokens: ThemeConfig['token'] = {
 // Used by login page / loading splash to pick a backdrop matching the mode.
 export const SPLASH_BG_LIGHT = '#EEF0FD';
 export const SPLASH_BG_DARK = '#0E0F1B';
+
+/**
+ * Key ("critical") competencies are marked in purple — red is reserved for the
+ * >4 divergence flag. The dark step is lighter on purpose: the light-mode
+ * purple measures only 2.44:1 on the dark container and this color is used for
+ * text, not just an icon. Light 6.94:1 on white, dark 5.77:1 on #1A1B2E.
+ */
+export const CRITICAL_PURPLE_LIGHT = '#722ED1';
+export const CRITICAL_PURPLE_DARK = '#B37FEB';
+
+export function criticalPurple(isDark: boolean): string {
+  return isDark ? CRITICAL_PURPLE_DARK : CRITICAL_PURPLE_LIGHT;
+}
