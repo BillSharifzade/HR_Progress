@@ -79,6 +79,20 @@ type CreatePeriodRequest struct {
 	Criteria      []CriterionInput `json:"criteria"`
 }
 
+// UpdatePeriodRequest edits a campaign's own attributes and targeting. Status,
+// confirmed_at and published_at are owned by the lifecycle transitions and are
+// not editable here.
+type UpdatePeriodRequest struct {
+	Title         string   `json:"title"        validate:"required,min=1,max=200"`
+	DepartmentID  *string  `json:"department_id"`
+	PeriodStart   string   `json:"period_start" validate:"required"`
+	PeriodEnd     string   `json:"period_end"   validate:"required"`
+	GroupSize     *int     `json:"group_size"   validate:"omitempty,min=1"`
+	IsActive      *bool    `json:"is_active"`
+	DepartmentIDs []string `json:"department_ids"`
+	SectionIDs    []string `json:"section_ids"`
+}
+
 // ── Criteria (FR-AS3) ────────────────────────────────────────────────────────
 
 // Criterion is a competency selected for a campaign with a passing score.
@@ -164,8 +178,9 @@ type UpsertInterpretationRequest struct {
 	DepartmentID uuid.UUID `json:"department_id" validate:"required"`
 	GradeID      uuid.UUID `json:"grade_id"      validate:"required"`
 	CompetencyID uuid.UUID `json:"competency_id" validate:"required"`
-	Score        int       `json:"score"         validate:"required,min=1,max=10"`
-	Text         string    `json:"text"          validate:"required,min=1"`
+	// No `required`: it rejects the zero value, and 0 is a valid score.
+	Score int    `json:"score" validate:"min=0,max=10"`
+	Text  string `json:"text"  validate:"required,min=1"`
 }
 
 // CopyInterpretationsRequest copies all active interpretations from one
@@ -264,7 +279,9 @@ type UpsertScoreRequest struct {
 	EmployeeID   uuid.UUID `json:"employee_id"   validate:"required"`
 	CompetencyID uuid.UUID `json:"competency_id" validate:"required"`
 	AssessorRole string    `json:"assessor_role" validate:"omitempty,oneof=HEAD DEPT_HEAD HRA DCR_HEAD ASSESSOR"`
-	Score        *float64  `json:"score" validate:"omitempty,min=1,max=10"`
+	// omitempty only skips a nil pointer here — a pointer to 0 still validates,
+	// so the bound has to be min=0 for a 0 mark to get through.
+	Score *float64 `json:"score" validate:"omitempty,min=0,max=10"`
 	Feedback     *string   `json:"feedback"`
 }
 

@@ -134,6 +134,24 @@ export async function createPeriod(payload: {
   return r.data;
 }
 
+export async function updatePeriod(id: string, payload: {
+  title: string;
+  department_id?: string | null;
+  period_start: string;
+  period_end: string;
+  group_size?: number;
+  is_active?: boolean;
+  department_ids?: string[];
+  section_ids?: string[];
+}): Promise<AssessmentPeriod> {
+  const r = await client.put<AssessmentPeriod>(`/assessment-periods/${id}/`, payload);
+  return r.data;
+}
+
+export async function deletePeriod(id: string): Promise<void> {
+  await client.delete(`/assessment-periods/${id}/`);
+}
+
 // ── Criteria (FR-AS3) ────────────────────────────────────────────────────────
 export async function listCriteria(periodId: string): Promise<import('../types').Criterion[]> {
   const r = await client.get<import('../types').Criterion[]>(`/assessment-periods/${periodId}/criteria`);

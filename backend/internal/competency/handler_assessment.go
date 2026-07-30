@@ -350,7 +350,7 @@ func (h *Handler) lookupInterpretation(w http.ResponseWriter, r *http.Request) {
 	}
 	score, err := parseScore(r.URL.Query().Get("score"))
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "score must be 1..10")
+		httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "score must be 0..10")
 		return
 	}
 	out, err := h.svc.LookupInterpretationForScore(r.Context(), assesseeID, compID, score)
@@ -425,7 +425,7 @@ func (h *Handler) interpretationHistory(w http.ResponseWriter, r *http.Request) 
 	if sv := r.URL.Query().Get("score"); sv != "" {
 		s, err := parseScore(sv)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "score must be 1..10")
+			httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "score must be 0..10")
 			return
 		}
 		scorePtr = &s
@@ -461,7 +461,7 @@ func parseScore(s string) (int, error) {
 		}
 		n = n*10 + int(ch-'0')
 	}
-	if n < 1 || n > 10 {
+	if n < 0 || n > 10 {
 		return 0, errors.New("out of range")
 	}
 	return n, nil

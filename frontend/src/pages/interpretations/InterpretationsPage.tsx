@@ -132,8 +132,8 @@ export function InterpretationsPage() {
           <Form.Item name="competency_id" label="Компетенция" rules={[{ required: true }]}>
             <Select options={competencies.map(c => ({ value: c.id, label: c.name }))} optionFilterProp="label" showSearch />
           </Form.Item>
-          <Form.Item name="score" label="Балл (1–10)" rules={[{ required: true }]}>
-            <InputNumber min={1} max={10} style={{ width: '100%' }} />
+          <Form.Item name="score" label="Балл (0–10)" rules={[{ required: true }]}>
+            <InputNumber min={0} max={10} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="text" label="Текст интерпретации" rules={[{ required: true }]}>
             <Input.TextArea autoSize={{ minRows: 3, maxRows: 8 }} />

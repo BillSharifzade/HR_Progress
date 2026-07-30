@@ -2,9 +2,10 @@ package competency
 
 import (
 	"context"
-	"time"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -136,32 +137,6 @@ func (r *Repository) ListEmployees(ctx context.Context, deptID uuid.UUID) ([]Emp
 	return out, rows.Err()
 }
 
-func (r *Repository) BulkUpsertScores(ctx context.Context, periodID uuid.UUID, reqs []UpsertScoreRequest, assessedBy uuid.UUID) error {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	now := time.Now()
-	for _, req := range reqs {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO assessment_scores
-				(period_id, employee_id, competency_id, assessor_role, score, feedback, assessed_by, assessed_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (period_id, employee_id, competency_id, assessor_role) DO UPDATE SET
-				score       = EXCLUDED.score,
-				feedback    = EXCLUDED.feedback,
-				assessed_by = EXCLUDED.assessed_by,
-				assessed_at = EXCLUDED.assessed_at,
-				updated_at  = now()`,
-			periodID, req.EmployeeID, req.CompetencyID, req.AssessorRole,
-			req.Score, req.Feedback, assessedBy, now); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
-}
-
 func (r *Repository) ListAllDepartments(ctx context.Context) ([]Department, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, code, name, COALESCE(description,''), is_active
@@ -259,19 +234,25 @@ func (r *Repository) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Peri
 	}
 	var err error
 
-	const cols = `id, title, department_id, period_start, period_end, is_active,
-		status, group_size, confirmed_at, published_at, created_by, created_at, updated_at`
+	// Targeting is aggregated inline so the admin list can prefill the edit
+	// form without a second round trip per row.
+	const cols = `p.id, p.title, p.department_id, p.period_start, p.period_end, p.is_active,
+		p.status, p.group_size, p.confirmed_at, p.published_at, p.created_by, p.created_at, p.updated_at,
+		COALESCE((SELECT array_agg(d.department_id)
+		            FROM assessment_period_departments d WHERE d.period_id = p.id), '{}'),
+		COALESCE((SELECT array_agg(s.section_id)
+		            FROM assessment_period_sections s WHERE s.period_id = p.id), '{}')`
 	if deptID != nil {
 		rows, err = r.db.Query(ctx, `
 			SELECT `+cols+`
-			FROM assessment_periods
-			WHERE department_id = $1
-			ORDER BY period_start DESC`, *deptID)
+			FROM assessment_periods p
+			WHERE p.department_id = $1
+			ORDER BY p.period_start DESC`, *deptID)
 	} else {
 		rows, err = r.db.Query(ctx, `
 			SELECT `+cols+`
-			FROM assessment_periods
-			ORDER BY period_start DESC`)
+			FROM assessment_periods p
+			ORDER BY p.period_start DESC`)
 	}
 	if err != nil {
 		return nil, err
@@ -281,7 +262,10 @@ func (r *Repository) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Peri
 	var out []Period
 	for rows.Next() {
 		var p Period
-		if err := scanPeriod(rows, &p); err != nil {
+		if err := rows.Scan(&p.ID, &p.Title, &p.DepartmentID, &p.PeriodStart, &p.PeriodEnd,
+			&p.IsActive, &p.Status, &p.GroupSize, &p.ConfirmedAt, &p.PublishedAt,
+			&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
+			&p.DepartmentIDs, &p.SectionIDs); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -312,6 +296,40 @@ func (r *Repository) CreatePeriod(ctx context.Context, p Period) (Period, error)
 		return Period{}, err
 	}
 	return out, nil
+}
+
+// UpdatePeriod rewrites a campaign's editable attributes. Status and the
+// confirmed/published timestamps belong to the lifecycle transitions and are
+// left untouched.
+func (r *Repository) UpdatePeriod(ctx context.Context, id uuid.UUID, p Period) (Period, error) {
+	var out Period
+	err := scanPeriod(r.db.QueryRow(ctx, `
+		UPDATE assessment_periods
+		   SET title = $2, department_id = $3, period_start = $4, period_end = $5,
+		       is_active = $6, group_size = $7, updated_at = now()
+		 WHERE id = $1
+		RETURNING id, title, department_id, period_start, period_end, is_active,
+		          status, group_size, confirmed_at, published_at, created_by, created_at, updated_at`,
+		id, p.Title, p.DepartmentID, p.PeriodStart, p.PeriodEnd, p.IsActive, p.GroupSize,
+	), &out)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Period{}, ErrNotFound
+	}
+	return out, err
+}
+
+// DeletePeriod removes a campaign outright. Every child table (scores,
+// participants, criteria, assessees, targeting, learning groups, consolidated
+// marks) declares ON DELETE CASCADE, so the whole campaign goes with it.
+func (r *Repository) DeletePeriod(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM assessment_periods WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) GetPeriod(ctx context.Context, id uuid.UUID) (Period, error) {
@@ -424,26 +442,4 @@ func (r *Repository) DeleteCompetency(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-func (r *Repository) UpsertScore(ctx context.Context, periodID uuid.UUID, req UpsertScoreRequest, assessedBy uuid.UUID) (Score, error) {
-	now := time.Now()
-	var s Score
-	err := r.db.QueryRow(ctx, `
-		INSERT INTO assessment_scores
-			(period_id, employee_id, competency_id, assessor_role, score, feedback, assessed_by, assessed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (period_id, employee_id, competency_id, assessor_role) DO UPDATE SET
-			score       = EXCLUDED.score,
-			feedback    = EXCLUDED.feedback,
-			assessed_by = EXCLUDED.assessed_by,
-			assessed_at = EXCLUDED.assessed_at,
-			updated_at  = now()
-		RETURNING id, period_id, employee_id, competency_id, assessor_role,
-		          score, feedback, assessed_by, assessed_at, updated_at`,
-		periodID, req.EmployeeID, req.CompetencyID, req.AssessorRole,
-		req.Score, req.Feedback, assessedBy, now,
-	).Scan(&s.ID, &s.PeriodID, &s.EmployeeID, &s.CompetencyID, &s.AssessorRole,
-		&s.Score, &s.Feedback, &s.AssessedBy, &s.AssessedAt, &s.UpdatedAt)
-	return s, err
 }

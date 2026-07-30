@@ -15,6 +15,8 @@ var (
 	ErrNoCriteria    = errors.New("campaign has no criteria")
 	ErrNoAssessees   = errors.New("campaign has no assessees")
 	ErrNotPublished  = errors.New("results are not published yet")
+	// ErrPeriodPublished guards deletion of a campaign whose results are live.
+	ErrPeriodPublished = errors.New("campaign is published")
 )
 
 // Status constants for assessment campaigns (Section 5).

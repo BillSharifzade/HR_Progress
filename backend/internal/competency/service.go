@@ -162,17 +162,39 @@ func (s *Service) ListPeriods(ctx context.Context, deptID *uuid.UUID) ([]Period,
 	return s.repo.ListPeriods(ctx, deptID)
 }
 
-func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, createdBy uuid.UUID) (Period, error) {
-	start, err := time.Parse("2006-01-02", req.PeriodStart)
+// parsePeriodRange validates the YYYY-MM-DD boundaries of a campaign.
+func parsePeriodRange(startStr, endStr string) (start, end time.Time, err error) {
+	start, err = time.Parse("2006-01-02", startStr)
 	if err != nil {
-		return Period{}, errors.New("invalid period_start date, expected YYYY-MM-DD")
+		return time.Time{}, time.Time{}, errors.New("invalid period_start date, expected YYYY-MM-DD")
 	}
-	end, err := time.Parse("2006-01-02", req.PeriodEnd)
+	end, err = time.Parse("2006-01-02", endStr)
 	if err != nil {
-		return Period{}, errors.New("invalid period_end date, expected YYYY-MM-DD")
+		return time.Time{}, time.Time{}, errors.New("invalid period_end date, expected YYYY-MM-DD")
 	}
 	if end.Before(start) {
-		return Period{}, errors.New("period_end must not be before period_start")
+		return time.Time{}, time.Time{}, errors.New("period_end must not be before period_start")
+	}
+	return start, end, nil
+}
+
+// optDeptID resolves the campaign's primary department id from the request.
+// Empty string and nil both mean "no primary department".
+func optDeptID(in *string) (*uuid.UUID, error) {
+	if in == nil || *in == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*in)
+	if err != nil {
+		return nil, errors.New("invalid department_id")
+	}
+	return &id, nil
+}
+
+func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, createdBy uuid.UUID) (Period, error) {
+	start, end, err := parsePeriodRange(req.PeriodStart, req.PeriodEnd)
+	if err != nil {
+		return Period{}, err
 	}
 
 	p := Period{
@@ -186,13 +208,11 @@ func (s *Service) CreatePeriod(ctx context.Context, req CreatePeriodRequest, cre
 	if req.GroupSize != nil && *req.GroupSize > 0 {
 		p.GroupSize = *req.GroupSize
 	}
-	if req.DepartmentID != nil && *req.DepartmentID != "" {
-		id, err := uuid.Parse(*req.DepartmentID)
-		if err != nil {
-			return Period{}, errors.New("invalid department_id")
-		}
-		p.DepartmentID = &id
+	deptID, err := optDeptID(req.DepartmentID)
+	if err != nil {
+		return Period{}, err
 	}
+	p.DepartmentID = deptID
 	created, err := s.repo.CreatePeriod(ctx, p)
 	if err != nil {
 		return Period{}, err
@@ -244,6 +264,70 @@ func appendUnique(ids []uuid.UUID, id uuid.UUID) []uuid.UUID {
 		}
 	}
 	return append(ids, id)
+}
+
+func (s *Service) UpdatePeriod(ctx context.Context, id uuid.UUID, req UpdatePeriodRequest) (Period, error) {
+	current, err := s.repo.GetPeriod(ctx, id)
+	if err != nil {
+		return Period{}, ErrNotFound
+	}
+	start, end, err := parsePeriodRange(req.PeriodStart, req.PeriodEnd)
+	if err != nil {
+		return Period{}, err
+	}
+	deptID, err := optDeptID(req.DepartmentID)
+	if err != nil {
+		return Period{}, err
+	}
+
+	next := current
+	next.Title = req.Title
+	next.PeriodStart = start
+	next.PeriodEnd = end
+	next.DepartmentID = deptID
+	if req.GroupSize != nil && *req.GroupSize > 0 {
+		next.GroupSize = *req.GroupSize
+	}
+	if req.IsActive != nil {
+		next.IsActive = *req.IsActive
+	}
+
+	updated, err := s.repo.UpdatePeriod(ctx, id, next)
+	if err != nil {
+		return Period{}, err
+	}
+
+	deptIDs, err := parseUUIDs(req.DepartmentIDs)
+	if err != nil {
+		return Period{}, errors.New("invalid department_ids")
+	}
+	if updated.DepartmentID != nil {
+		deptIDs = appendUnique(deptIDs, *updated.DepartmentID)
+	}
+	sectionIDs, err := parseUUIDs(req.SectionIDs)
+	if err != nil {
+		return Period{}, errors.New("invalid section_ids")
+	}
+	if err := s.repo.SetPeriodTargets(ctx, id, deptIDs, sectionIDs); err != nil {
+		return Period{}, err
+	}
+	updated.DepartmentIDs = deptIDs
+	updated.SectionIDs = sectionIDs
+	return updated, nil
+}
+
+// DeletePeriod drops a campaign and everything recorded under it. Published
+// campaigns are protected: their marks are already visible to workers and feed
+// the talent profiles, so removing one would silently rewrite history.
+func (s *Service) DeletePeriod(ctx context.Context, id uuid.UUID) error {
+	p, err := s.repo.GetPeriod(ctx, id)
+	if err != nil {
+		return ErrNotFound
+	}
+	if p.Status == StatusPublished {
+		return ErrPeriodPublished
+	}
+	return s.repo.DeletePeriod(ctx, id)
 }
 
 func (s *Service) GetPeriodWithScores(ctx context.Context, id uuid.UUID) (Period, []Score, error) {

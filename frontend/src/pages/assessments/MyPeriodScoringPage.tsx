@@ -167,28 +167,43 @@ export function MyPeriodScoringPage() {
   const handleSave = async () => {
     if (!periodId) return;
     // Union of keys that changed score or comment text.
-    const keys = new Set<string>([...dirtyKeys, ...Object.keys(draftText)]);
-    if (keys.size === 0) return;
+    const keys = [...new Set<string>([...dirtyKeys, ...Object.keys(draftText)])];
+    if (keys.length === 0) return;
     setSaving(true);
-    try {
-      for (const k of keys) {
-        const [wid, cid, role] = k.split(':');
-        const scoreVal = k in draft
-          ? draft[k]
-          : myScores.find(s => s.employee_id === wid && s.competency_id === cid && s.assessor_role === role)?.score ?? null;
+
+    // Each cell is its own request, so a failure part-way through leaves the
+    // earlier ones committed. Keep going, drop only the drafts that actually
+    // persisted, and report the server's reason rather than a bare "failed" —
+    // otherwise a rejected cell silently looks like the whole save died.
+    const saved = new Set<string>();
+    let failure = '';
+    for (const k of keys) {
+      const [wid, cid, role] = k.split(':');
+      const scoreVal = k in draft
+        ? draft[k]
+        : myScores.find(s => s.employee_id === wid && s.competency_id === cid && s.assessor_role === role)?.score ?? null;
+      try {
         await upsertScore(periodId, {
           employee_id: wid, competency_id: cid, assessor_role: role,
           score: scoreVal, feedback: draftText[k] ?? null,
         });
+        saved.add(k);
+      } catch (e: any) {
+        failure ||= e?.response?.data?.error?.message ?? 'неизвестная ошибка';
       }
-      setDraft({});
-      setDraftText({});
-      await refetchScores();
+    }
+
+    const keepUnsaved = (d: Record<string, any>) =>
+      Object.fromEntries(Object.entries(d).filter(([k]) => !saved.has(k)));
+    setDraft(keepUnsaved);
+    setDraftText(keepUnsaved);
+    await refetchScores();
+    setSaving(false);
+
+    if (failure) {
+      msg.error(`Сохранено ${saved.size} из ${keys.length}. Ошибка: ${failure}`);
+    } else {
       msg.success('Сохранено');
-    } catch {
-      msg.error('Не удалось сохранить');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -396,13 +411,13 @@ export function MyPeriodScoringPage() {
                                 <td style={{ textAlign: 'center', padding: '8px 4px' }}>
                                   <Space size={2}>
                                     <InputNumber
-                                      min={1}
+                                      min={0}
                                       max={10}
                                       step={0.1}
                                       precision={1}
                                       controls={false}
                                       value={sc ?? undefined}
-                                      placeholder="1–10"
+                                      placeholder="0–10"
                                       style={{ width: 64 }}
                                       onChange={(v) => {
                                         if (!selectedWorker || !activeRole) return;

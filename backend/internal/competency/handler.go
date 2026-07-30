@@ -64,6 +64,8 @@ func (h *Handler) Mount(r chi.Router, jwt *auth.JWTIssuer) {
 		r.Post("/", h.createPeriod)
 		r.Route("/{period_id}", func(r chi.Router) {
 			r.Get("/", h.getPeriod)
+			r.With(requireAdmin).Put("/", h.updatePeriod)
+			r.With(requireAdmin).Delete("/", h.deletePeriod)
 			r.Post("/scores", h.upsertScore)
 			r.Post("/scores/bulk", h.bulkUpsertScores)
 			r.Route("/participants", func(r chi.Router) {
@@ -477,6 +479,54 @@ func (h *Handler) getPeriod(w http.ResponseWriter, r *http.Request) {
 		"criteria":  criteria,
 		"assessees": assessees,
 	})
+}
+
+func (h *Handler) updatePeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "period_id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "invalid period_id")
+		return
+	}
+	var req UpdatePeriodRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "BAD_JSON", "invalid JSON")
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "VALIDATION", err.Error())
+		return
+	}
+	period, err := h.svc.UpdatePeriod(r.Context(), id, req)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "period not found")
+			return
+		}
+		httpx.WriteError(w, http.StatusUnprocessableEntity, "INVALID", err.Error())
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, period)
+}
+
+func (h *Handler) deletePeriod(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "period_id"))
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "BAD_PARAM", "invalid period_id")
+		return
+	}
+	if err := h.svc.DeletePeriod(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "period not found")
+		case errors.Is(err, ErrPeriodPublished):
+			httpx.WriteError(w, http.StatusConflict, "PUBLISHED",
+				"опубликованную кампанию удалить нельзя")
+		default:
+			httpx.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) upsertScore(w http.ResponseWriter, r *http.Request) {
