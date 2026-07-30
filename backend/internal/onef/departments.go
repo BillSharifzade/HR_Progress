@@ -19,14 +19,17 @@ var explicitDeptAliases = map[string]string{
 // Per product decision 2026-05-26: these are out of scope; their workers
 // should never appear in our DB, even if 1F lists them.
 //
-// "Департамент Фармацевтической Промоции" (ДФП) was dropped from this list on
-// 2026-07-29 — it is in scope now and its workers sync like any other dept.
+// "Департамент Фармацевтической Промоции" was briefly un-ignored on 2026-07-29
+// and restored here on 2026-07-30 — it is out of scope after all. Leaving it
+// out of this map is what lets the sync recreate the department, so removing
+// the row from the UI is not enough on its own.
 //
 // Keys are normalized via normalizeDeptName so minor whitespace/case
 // drift in 1F doesn't accidentally bypass the filter.
 var ignoredDepartments = map[string]bool{
-	normalizeDeptName("Дусти Фарма"):                       true,
-	normalizeDeptName("Департамент Инженерной Экспертизы"): true,
+	normalizeDeptName("Дусти Фарма"):                           true,
+	normalizeDeptName("Департамент Инженерной Экспертизы"):     true,
+	normalizeDeptName("Департамент Фармацевтической Промоции"): true,
 }
 
 // isIgnoredDepartment reports whether a 1F Department value should be

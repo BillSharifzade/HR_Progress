@@ -12,8 +12,11 @@ func TestIsIgnoredDepartment(t *testing.T) {
 		{"инженерная экспертиза is out of scope", "Департамент Инженерной Экспертизы", true},
 		{"casing and spacing drift still matches", "  департамент   инженерной экспертизы ", true},
 
-		// ДФП was un-ignored on 2026-07-29 — it must sync like any other dept.
-		{"фармацевтическая промоция syncs", "Департамент Фармацевтической Промоции", false},
+		// Un-ignored 2026-07-29, restored 2026-07-30: out of scope after all.
+		// Without this entry the sync recreates the department after every
+		// manual deletion.
+		{"фармацевтическая промоция is out of scope", "Департамент Фармацевтической Промоции", true},
+		{"...including with spacing drift", "департамент  фармацевтической промоции", true},
 
 		{"unrelated dept syncs", "Финансово-Экономический Департамент", false},
 		{"empty name is not ignored", "", false},
