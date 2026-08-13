@@ -293,3 +293,41 @@ func TestParseEmploymentProse(t *testing.T) {
 		t.Errorf("a capitalised list must split into 3, got %d: %#v", len(got), got)
 	}
 }
+
+// The override map is keyed on NormalizedKey(form name). A typo there would
+// silently do nothing, so assert every key is reachable from the exact string
+// the questionnaire actually contains.
+func TestReviewedNameOverridesAreReachable(t *testing.T) {
+	formNames := map[string]string{
+		"Ниёззода Мухайё Исмоилчон":     "Ниёззода Мухайёи Исмоилджон",
+		"Мачидов Исматулло":             "Маджидов Исматулло Рахматуллоевич",
+		"Латипов Хасан Гафорович":       "Латипов Хасанчон Гафорович",
+		"Абдуллозода Абдулло Абдулазиз": "Абдуллозода Абдулоджон Абдулазиз",
+		"Хамидова Марьям Сухробовна":    "Хамидова Бибимарям Сухробовна",
+	}
+	if len(reviewedNameOverrides) != len(formNames) {
+		t.Fatalf("override map has %d entries, test covers %d",
+			len(reviewedNameOverrides), len(formNames))
+	}
+	for formName, wantEmployee := range formNames {
+		got, ok := reviewedNameOverrides[NormalizedKey(formName)]
+		if !ok {
+			t.Errorf("no override reachable for %q (key %q)", formName, NormalizedKey(formName))
+			continue
+		}
+		if got != wantEmployee {
+			t.Errorf("%q -> %q, want %q", formName, got, wantEmployee)
+		}
+	}
+
+	// The override must resolve against a real employee record.
+	staff := []Employee{emp("Ниёззода Мухайёи Исмоилджон"), emp("Хукматзода Абдулло Файзулло")}
+	if _, ok := FindByFullName(staff, "Ниёззода Мухайёи Исмоилджон"); !ok {
+		t.Error("FindByFullName failed on an exact employee name")
+	}
+
+	// The collision the threshold exists to catch must stay unmatched.
+	if _, ok := reviewedNameOverrides[NormalizedKey("Хукматов Файзулло")]; ok {
+		t.Error("Хукматов Файзулло must NOT be overridden — different person from Хукматзода")
+	}
+}

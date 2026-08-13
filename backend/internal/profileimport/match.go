@@ -15,8 +15,24 @@ const (
 	MatchExact      MatchStatus = "EXACT"      // identical token sets
 	MatchPartial    MatchStatus = "PARTIAL"    // form omitted a name part (usually the patronymic)
 	MatchFuzzy      MatchStatus = "FUZZY"      // close enough on every token
+	MatchOverride   MatchStatus = "OVERRIDE"   // tied by hand after review
 	MatchUnresolved MatchStatus = "UNRESOLVED" // too weak, or two candidates too close together
 )
+
+// NormalizedKey renders a name in the form used to key manual overrides.
+func NormalizedKey(s string) string { return strings.Join(normalizeName(s), " ") }
+
+// FindByFullName looks an employee up by their exact recorded name, compared
+// after the same normalisation the matcher uses.
+func FindByFullName(employees []Employee, fullName string) (Employee, bool) {
+	want := NormalizedKey(fullName)
+	for _, e := range employees {
+		if NormalizedKey(e.FullName) == want {
+			return e, true
+		}
+	}
+	return Employee{}, false
+}
 
 // Candidate is one possible employee for a form row.
 type Candidate struct {

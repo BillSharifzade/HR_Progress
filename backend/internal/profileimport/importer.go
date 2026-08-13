@@ -32,6 +32,29 @@ var outOfScopeDepartments = map[string]bool{
 	"департамент инженерной экспертизы": true,
 }
 
+// reviewedNameOverrides ties a questionnaire spelling to the employee record it
+// belongs to, for cases the matcher deliberately refused and a human then
+// confirmed (2026-08-13).
+//
+// Each of these scored 0.81–0.89 — under the 0.90 floor — because the form and
+// 1F spell the same person differently: Мухайё/Мухайёи, Мачидов/Маджидов,
+// Хасан/Хасанчон, Абдулло/Абдулоджон, Марьям/Бибимарям. The department
+// corroborates every entry.
+//
+// An explicit list is used rather than lowering the threshold, because the
+// threshold also guards the genuine collisions in this data — "Хукматов
+// Файзулло" scores 0.850 against "Хукматзода Абдулло Файзулло" and is a
+// DIFFERENT person. Loosening the rule would silently import that one too.
+//
+// Keys are NormalizedKey(form name); values are the employee's recorded name.
+var reviewedNameOverrides = map[string]string{
+	"ниеззода мухайе исмоилчон":     "Ниёззода Мухайёи Исмоилджон",
+	"мачидов исматулло":             "Маджидов Исматулло Рахматуллоевич",
+	"латипов хасан гафорович":       "Латипов Хасанчон Гафорович",
+	"абдуллозода абдулло абдулазиз": "Абдуллозода Абдулоджон Абдулазиз",
+	"хамидова марьям сухробовна":    "Хамидова Бибимарям Сухробовна",
+}
+
 // Row is one questionnaire response, as produced by scripts/form_to_json.py.
 type Row struct {
 	SourceRow   int    `json:"source_row"`
@@ -173,7 +196,7 @@ func (rep Report) String() string {
 	imported := rep.countBy(func(o RowOutcome) bool { return o.Skipped == "" && o.Status != MatchUnresolved })
 	fmt.Fprintf(&b, "rows in file      : %d\n", len(rep.Outcomes))
 	fmt.Fprintf(&b, "imported          : %d\n", imported)
-	for _, st := range []MatchStatus{MatchExact, MatchPartial, MatchFuzzy} {
+	for _, st := range []MatchStatus{MatchExact, MatchPartial, MatchFuzzy, MatchOverride} {
 		if n := rep.countBy(func(o RowOutcome) bool { return o.Skipped == "" && o.Status == st }); n > 0 {
 			fmt.Fprintf(&b, "  %-14s: %d\n", st, n)
 		}
@@ -320,6 +343,12 @@ func (im *Importer) Run(ctx context.Context, f *File, dryRun bool) (*Report, err
 		}
 
 		m := MatchName(row.FullName, employees)
+		// A reviewed override wins over the matcher's own verdict.
+		if target, ok := reviewedNameOverrides[NormalizedKey(row.FullName)]; ok {
+			if e, found := FindByFullName(employees, target); found {
+				m = Match{Status: MatchOverride, UserID: e.ID, Score: 1}
+			}
+		}
 		out.Status, out.Score, out.Candidates = m.Status, m.Score, m.Candidates
 
 		if m.Status == MatchUnresolved {
