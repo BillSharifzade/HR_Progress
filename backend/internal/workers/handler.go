@@ -16,6 +16,10 @@ import (
 type Handler struct {
 	repo     *Repository
 	validate *validator.Validate
+	// files is nil when no upload directory is configured; the certificate
+	// upload/download endpoints then report 503 rather than panicking.
+	files          *FileStore
+	maxUploadBytes int64
 }
 
 func NewHandler(repo *Repository) *Handler {
@@ -23,6 +27,13 @@ func NewHandler(repo *Repository) *Handler {
 		repo:     repo,
 		validate: validator.New(validator.WithRequiredStructEnabled()),
 	}
+}
+
+// WithFileStore enables certificate document upload and download.
+func (h *Handler) WithFileStore(fs *FileStore, maxUploadBytes int64) *Handler {
+	h.files = fs
+	h.maxUploadBytes = maxUploadBytes
+	return h
 }
 
 func (h *Handler) Mount(r chi.Router, jwt *auth.JWTIssuer) {
@@ -38,8 +49,14 @@ func (h *Handler) Mount(r chi.Router, jwt *auth.JWTIssuer) {
 			r.Route("/certifications", func(r chi.Router) {
 				r.Get("/", h.listCertifications)
 				r.Post("/", h.createCertification)
+				r.Patch("/{cert_id}", h.updateCertification)
 				r.Delete("/{cert_id}", h.deleteCertification)
+				// A certificate is either a link or an uploaded document.
+				r.Post("/{cert_id}/file", h.uploadCertificationFile)
+				r.Get("/{cert_id}/file", h.downloadCertificationFile)
+				r.Delete("/{cert_id}/file", h.deleteCertificationFile)
 			})
+			h.mountProfile(r)
 			r.Route("/history", func(r chi.Router) {
 				r.Get("/", h.listHistory)
 				r.Post("/", h.createHistory)
@@ -274,11 +291,7 @@ func (h *Handler) createCertification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cert, err := h.repo.CreateCertification(r.Context(), id, req)
-	if err != nil {
-		httpx.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
-		return
-	}
-	httpx.WriteJSON(w, http.StatusCreated, cert)
+	writeResult(w, http.StatusCreated, cert, err)
 }
 
 func (h *Handler) deleteCertification(w http.ResponseWriter, r *http.Request) {
@@ -292,12 +305,17 @@ func (h *Handler) deleteCertification(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "INVALID_ID", "cert_id")
 		return
 	}
-	if err := h.repo.DeleteCertification(r.Context(), certUUID, workerUUID); errors.Is(err, ErrNotFound) {
+	filePath, err := h.repo.DeleteCertification(r.Context(), certUUID, workerUUID)
+	if errors.Is(err, ErrNotFound) {
 		httpx.WriteError(w, http.StatusNotFound, "NOT_FOUND", "certification not found")
 		return
 	} else if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, "DB_ERROR", err.Error())
 		return
+	}
+	// The row is gone, so any attached document is now unreferenced.
+	if filePath != nil && h.files != nil {
+		_ = h.files.Remove(*filePath)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

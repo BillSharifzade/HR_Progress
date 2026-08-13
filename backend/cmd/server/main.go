@@ -100,6 +100,19 @@ func main() {
 	workersRepo := workers.NewRepository(pool)
 	workersHandler := workers.NewHandler(workersRepo)
 
+	// Certificate documents. A failure to prepare the directory is not fatal:
+	// the rest of the app is fully usable without uploads, and the endpoints
+	// report 503 rather than the whole service refusing to start.
+	if err := os.MkdirAll(cfg.UploadDir, 0o750); err != nil {
+		log.Error("upload dir unavailable, certificate uploads disabled",
+			slog.String("dir", cfg.UploadDir), slog.String("err", err.Error()))
+	} else {
+		workersHandler = workersHandler.WithFileStore(
+			workers.NewFileStore(cfg.UploadDir, cfg.MaxUploadBytes), cfg.MaxUploadBytes)
+		log.Info("certificate uploads enabled",
+			slog.String("dir", cfg.UploadDir), slog.Int64("max_bytes", cfg.MaxUploadBytes))
+	}
+
 	oneFClient := onef.NewClient(cfg.OneFBaseURL, cfg.OneFAuthToken)
 	oneFRepo := onef.NewRepository(pool)
 	oneFSvc := onef.NewService(oneFRepo, oneFClient, workersRepo, log)

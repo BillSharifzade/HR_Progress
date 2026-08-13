@@ -8,26 +8,31 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined,
+  CheckOutlined, CloseOutlined, EditOutlined,
   PlusOutlined, SafetyCertificateOutlined, UserOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
 import {
-  getWorker, listCertifications, listHistory,
-  createCertification, deleteCertification, createHistory,
+  getWorker, listHistory, createHistory,
   updateWorker, activateWorker, deactivateWorker,
   listSections,
-  type CertificationPayload, type HistoryPayload, type UpdateWorkerPayload,
+  type HistoryPayload, type UpdateWorkerPayload,
 } from '../../api/workers';
 import { listDepartments, listGrades } from '../../api/competency';
-import type { WorkerCertification, WorkerHistory, UserRole } from '../../types';
+import type { WorkerHistory, UserRole } from '../../types';
 import { UserRoleLabel } from '../../types';
 import { useAuth } from '../../auth/useAuth';
 import { canEditWorkers } from '../../auth/permissions';
 import { PageSkeleton } from '../../components/PageSkeleton';
 import { PageHeader } from '../../components/PageHeader';
+import { Field } from '../../components/Field';
+import { DigitalProfileCard } from './profile/DigitalProfileCard';
+import { LanguagesCard } from './profile/LanguagesCard';
+import { ExperienceTab } from './profile/ExperienceTab';
+import { SurveyTab } from './profile/SurveyTab';
+import { CertificationsTab } from './profile/CertificationsTab';
 
 const GRADE_COLORS: Record<number, string> = {
   1: 'default', 2: 'geekblue', 3: 'cyan', 4: 'green', 5: 'orange',
@@ -48,72 +53,6 @@ function tenure(hiredAt: string) {
   return [y > 0 && `${y} г.`, m > 0 && `${m} мес.`].filter(Boolean).join(' ') || '< 1 мес.';
 }
 function fmt(d?: string | null) { return d ? dayjs(d).format('DD.MM.YYYY') : '—'; }
-
-// ─── Inline field row ────────────────────────────────────────────────────────
-function Field({
-  label, value, editing, control,
-}: {
-  label: string;
-  value: React.ReactNode;
-  editing: boolean;
-  control: React.ReactNode;
-}) {
-  const { token } = antdTheme.useToken();
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
-      <span style={{ width: 170, flexShrink: 0, fontSize: 13, color: token.colorTextSecondary, userSelect: 'none' }}>
-        {label}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {editing
-          ? <div key="ctrl" className="field-control">{control}</div>
-          : <span key="txt" className="field-text" style={{ color: value ? token.colorText : token.colorTextDisabled }}>{value ?? '—'}</span>
-        }
-      </div>
-    </div>
-  );
-}
-
-// ─── Add cert drawer (new entry — stays as drawer) ───────────────────────────
-function AddCertDrawer({ workerId, onClose }: { workerId: string; onClose: () => void }) {
-  const [form] = Form.useForm();
-  const qc = useQueryClient();
-  const mut = useMutation({
-    mutationFn: (v: CertificationPayload) => createCertification(workerId, v),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['certifications', workerId] }); onClose(); },
-  });
-  const handleOk = async () => {
-    const v = await form.validateFields();
-    mut.mutate({
-      title: v.title,
-      issued_by: v.issued_by || null,
-      issued_at: v.issued_at ? (v.issued_at as Dayjs).format('YYYY-MM-DD') : null,
-      expires_at: v.expires_at ? (v.expires_at as Dayjs).format('YYYY-MM-DD') : null,
-    });
-  };
-  return (
-    <Drawer open title="Добавить сертификат" onClose={onClose} width={420}
-      footer={
-        <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
-          <Button onClick={onClose}>Отмена</Button>
-          <Button type="primary" onClick={handleOk} loading={mut.isPending}>Добавить</Button>
-        </Space>
-      }>
-      <Form form={form} layout="vertical">
-        <Form.Item name="title" label="Название" rules={[{ required: true }]}>
-          <Input placeholder="ACCA, IELTS, PMP…" />
-        </Form.Item>
-        <Form.Item name="issued_by" label="Организация"><Input /></Form.Item>
-        <Form.Item name="issued_at" label="Дата получения">
-          <DatePicker format="DD.MM.YYYY" style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="expires_at" label="Действует до">
-          <DatePicker format="DD.MM.YYYY" style={{ width: '100%' }} />
-        </Form.Item>
-      </Form>
-    </Drawer>
-  );
-}
 
 // ─── Add history drawer (new entry — stays as drawer) ────────────────────────
 function AddHistoryDrawer({ workerId, onClose }: { workerId: string; onClose: () => void }) {
@@ -168,14 +107,10 @@ export function WorkerProfile() {
   const [form] = Form.useForm();
   const [isEditing, setIsEditing] = useState(false);
   const [editDeptId, setEditDeptId] = useState<string | undefined>();
-  const [certDrawer, setCertDrawer] = useState(false);
   const [histDrawer, setHistDrawer] = useState(false);
 
   const { data: worker, isLoading } = useQuery({
     queryKey: ['worker', id], queryFn: () => getWorker(id!), enabled: !!id,
-  });
-  const { data: certifications = [] } = useQuery({
-    queryKey: ['certifications', id], queryFn: () => listCertifications(id!), enabled: !!id,
   });
   const { data: history = [] } = useQuery({
     queryKey: ['history', id], queryFn: () => listHistory(id!), enabled: !!id,
@@ -203,11 +138,6 @@ export function WorkerProfile() {
       qc.invalidateQueries({ queryKey: ['worker', id] });
       qc.invalidateQueries({ queryKey: ['workers'] });
     },
-  });
-
-  const deleteCert = useMutation({
-    mutationFn: (certId: string) => deleteCertification(id!, certId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['certifications', id] }),
   });
 
   const startEdit = () => {
@@ -252,21 +182,6 @@ export function WorkerProfile() {
 
   if (isLoading) return <PageSkeleton type="profile" />;
   if (!worker) return null;
-
-  const certColumns: ColumnsType<WorkerCertification> = [
-    { title: 'Сертификат', dataIndex: 'title', key: 'title' },
-    { title: 'Организация', dataIndex: 'issued_by', key: 'issued_by', render: (v) => v ?? '—' },
-    { title: 'Получен', key: 'a', width: 110, render: (_, r) => fmt(r.issued_at) },
-    { title: 'До', key: 'b', width: 110, render: (_, r) => fmt(r.expires_at) },
-    ...(canEdit ? [{
-      key: 'del', width: 44,
-      render: (_: unknown, r: WorkerCertification) => (
-        <Popconfirm title="Удалить?" onConfirm={() => deleteCert.mutate(r.id)} okText="Да" cancelText="Нет">
-          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-        </Popconfirm>
-      ),
-    }] : []),
-  ];
 
   const histColumns: ColumnsType<WorkerHistory> = [
     { title: 'Дата', dataIndex: 'event_date', key: 'date', width: 100, render: (v) => fmt(v) },
@@ -441,6 +356,10 @@ export function WorkerProfile() {
                     } />
                 </Card>
 
+                <LanguagesCard workerId={id!} canEdit={canEdit} />
+
+                <DigitalProfileCard workerId={id!} canEdit={canEdit} />
+
                 {!isEditing && (
                   <Space>
                     <Button disabled icon={<SafetyCertificateOutlined />}>Матрица компетенций</Button>
@@ -466,23 +385,22 @@ export function WorkerProfile() {
             ),
           },
           {
+            key: 'experience',
+            label: 'Опыт работы',
+            children: <ExperienceTab workerId={id!} canEdit={canEdit} />,
+          },
+          {
             key: 'certifications',
             label: 'Сертификаты',
-            children: (
-              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                {canEdit && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button icon={<PlusOutlined />} onClick={() => setCertDrawer(true)}>Добавить сертификат</Button>
-                  </div>
-                )}
-                <Table rowKey="id" columns={certColumns} dataSource={certifications} size="small"
-                  pagination={false} locale={{ emptyText: <Empty description="Сертификаты не добавлены" /> }} />
-              </Space>
-            ),
+            children: <CertificationsTab workerId={id!} canEdit={canEdit} />,
+          },
+          {
+            key: 'survey',
+            label: 'Результаты опросов',
+            children: <SurveyTab workerId={id!} canEdit={canEdit} />,
           },
         ]} />
 
-        {certDrawer && <AddCertDrawer workerId={id!} onClose={() => setCertDrawer(false)} />}
         {histDrawer && <AddHistoryDrawer workerId={id!} onClose={() => setHistDrawer(false)} />}
       </Space>
     </Form>

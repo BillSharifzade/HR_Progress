@@ -76,8 +76,80 @@ export interface WorkerCertification {
   issued_by?: string | null;
   issued_at?: string | null;
   expires_at?: string | null;
+  /** Link form — mutually exclusive with an uploaded document. */
+  source_url?: string | null;
+  file_name?: string | null;
+  file_size?: number | null;
+  content_type?: string | null;
+  has_file: boolean;
+  source: string;
   created_at: string;
   updated_at: string;
+}
+
+/** CEFR levels, strongest first — the order the UI presents them in. */
+export const CEFR_LEVELS = ['C2', 'C1', 'B2', 'B1', 'A2', 'A1'] as const;
+export type CefrLevel = (typeof CEFR_LEVELS)[number];
+
+export interface WorkerLanguage {
+  id: string;
+  user_id: string;
+  language: string;
+  level: CefrLevel;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkerExperience {
+  id: string;
+  user_id: string;
+  company: string;
+  position?: string | null;
+  started_on?: string | null;
+  ended_on?: string | null;
+  description?: string | null;
+  sort_order: number;
+  /** Original questionnaire fragment this row was split out of, if imported. */
+  raw_text?: string | null;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkerSurveyAnswer {
+  id: string;
+  user_id: string;
+  form_key: string;
+  question_code: string;
+  question_text: string;
+  answer_text: string;
+  position: number;
+  submitted_at?: string | null;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkerProfileData {
+  user_id: string;
+  education_levels: string[];
+  institution?: string | null;
+  specialty?: string | null;
+  prior_experience_band?: string | null;
+  career_goal?: string | null;
+  development_directions: string[];
+  mobility_readiness?: string | null;
+  relocation_readiness?: string | null;
+  internal_projects_readiness?: string | null;
+  teaching_readiness?: string | null;
+  professional_interests: string[];
+  learning_formats: string[];
+  learning_hours_band?: string | null;
+  submitted_at?: string | null;
+  source?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface WorkerHistory {

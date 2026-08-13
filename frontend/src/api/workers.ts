@@ -4,6 +4,11 @@ import type {
   WorkerSummary,
   WorkerCertification,
   WorkerHistory,
+  WorkerLanguage,
+  WorkerExperience,
+  WorkerSurveyAnswer,
+  WorkerProfileData,
+  CefrLevel,
   Position,
   Section,
   RoleAssignment,
@@ -38,6 +43,7 @@ export interface CertificationPayload {
   issued_by?: string | null;
   issued_at?: string | null;
   expires_at?: string | null;
+  source_url?: string | null;
 }
 
 export async function createCertification(
@@ -48,8 +54,165 @@ export async function createCertification(
   return r.data;
 }
 
+export async function updateCertification(
+  workerId: string,
+  certId: string,
+  payload: CertificationPayload,
+): Promise<WorkerCertification> {
+  const r = await client.patch<WorkerCertification>(
+    `/workers/${workerId}/certifications/${certId}`, payload);
+  return r.data;
+}
+
 export async function deleteCertification(workerId: string, certId: string): Promise<void> {
   await client.delete(`/workers/${workerId}/certifications/${certId}`);
+}
+
+export async function uploadCertificationFile(
+  workerId: string, certId: string, file: File,
+): Promise<WorkerCertification> {
+  const body = new FormData();
+  body.append('file', file);
+  const r = await client.post<WorkerCertification>(
+    `/workers/${workerId}/certifications/${certId}/file`, body,
+    { headers: { 'Content-Type': 'multipart/form-data' } });
+  return r.data;
+}
+
+export async function deleteCertificationFile(workerId: string, certId: string): Promise<void> {
+  await client.delete(`/workers/${workerId}/certifications/${certId}/file`);
+}
+
+/**
+ * Downloads a stored certificate. The endpoint needs the Authorization header,
+ * so the bytes are fetched through the axios client and handed to the browser
+ * as an object URL rather than linked to directly.
+ */
+export async function downloadCertificationFile(
+  workerId: string, certId: string, fileName: string,
+): Promise<void> {
+  const r = await client.get<Blob>(
+    `/workers/${workerId}/certifications/${certId}/file`, { responseType: 'blob' });
+  const url = URL.createObjectURL(r.data);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName || 'certificate';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// ─── Digital profile ────────────────────────────────────────────────────────
+
+export async function getWorkerProfile(workerId: string): Promise<WorkerProfileData> {
+  const r = await client.get<WorkerProfileData>(`/workers/${workerId}/profile/`);
+  return r.data;
+}
+
+export type ProfilePayload = Omit<
+  WorkerProfileData, 'user_id' | 'submitted_at' | 'source' | 'created_at' | 'updated_at'
+>;
+
+export async function saveWorkerProfile(
+  workerId: string, payload: ProfilePayload,
+): Promise<WorkerProfileData> {
+  const r = await client.put<WorkerProfileData>(`/workers/${workerId}/profile/`, payload);
+  return r.data;
+}
+
+export async function listLanguages(workerId: string): Promise<WorkerLanguage[]> {
+  const r = await client.get<WorkerLanguage[]>(`/workers/${workerId}/languages/`);
+  return r.data ?? [];
+}
+
+export interface LanguagePayload { language: string; level: CefrLevel }
+
+export async function upsertLanguage(
+  workerId: string, payload: LanguagePayload,
+): Promise<WorkerLanguage> {
+  const r = await client.post<WorkerLanguage>(`/workers/${workerId}/languages/`, payload);
+  return r.data;
+}
+
+export async function updateLanguage(
+  workerId: string, languageId: string, payload: LanguagePayload,
+): Promise<WorkerLanguage> {
+  const r = await client.patch<WorkerLanguage>(
+    `/workers/${workerId}/languages/${languageId}`, payload);
+  return r.data;
+}
+
+export async function deleteLanguage(workerId: string, languageId: string): Promise<void> {
+  await client.delete(`/workers/${workerId}/languages/${languageId}`);
+}
+
+export async function listExperience(workerId: string): Promise<WorkerExperience[]> {
+  const r = await client.get<WorkerExperience[]>(`/workers/${workerId}/experience/`);
+  return r.data ?? [];
+}
+
+export interface ExperiencePayload {
+  company: string;
+  position?: string | null;
+  started_on?: string | null;
+  ended_on?: string | null;
+  description?: string | null;
+  sort_order?: number | null;
+}
+
+export async function createExperience(
+  workerId: string, payload: ExperiencePayload,
+): Promise<WorkerExperience> {
+  const r = await client.post<WorkerExperience>(`/workers/${workerId}/experience/`, payload);
+  return r.data;
+}
+
+export async function updateExperience(
+  workerId: string, experienceId: string, payload: ExperiencePayload,
+): Promise<WorkerExperience> {
+  const r = await client.patch<WorkerExperience>(
+    `/workers/${workerId}/experience/${experienceId}`, payload);
+  return r.data;
+}
+
+export async function deleteExperience(workerId: string, experienceId: string): Promise<void> {
+  await client.delete(`/workers/${workerId}/experience/${experienceId}`);
+}
+
+export async function listSurveyAnswers(workerId: string): Promise<WorkerSurveyAnswer[]> {
+  const r = await client.get<WorkerSurveyAnswer[]>(`/workers/${workerId}/survey/`);
+  return r.data ?? [];
+}
+
+export interface SurveyAnswerPayload {
+  form_key?: string;
+  question_code: string;
+  question_text: string;
+  answer_text: string;
+  position?: number | null;
+}
+
+export async function upsertSurveyAnswer(
+  workerId: string, payload: SurveyAnswerPayload,
+): Promise<WorkerSurveyAnswer> {
+  const r = await client.post<WorkerSurveyAnswer>(`/workers/${workerId}/survey/`, payload);
+  return r.data;
+}
+
+export async function updateSurveyAnswer(
+  workerId: string, answerId: string, payload: SurveyAnswerPayload,
+): Promise<WorkerSurveyAnswer> {
+  const r = await client.patch<WorkerSurveyAnswer>(
+    `/workers/${workerId}/survey/${answerId}`, payload);
+  return r.data;
+}
+
+export async function deleteSurveyAnswer(workerId: string, answerId: string): Promise<void> {
+  await client.delete(`/workers/${workerId}/survey/${answerId}`);
 }
 
 export async function listWorkerRoles(workerId: string): Promise<RoleAssignment[]> {

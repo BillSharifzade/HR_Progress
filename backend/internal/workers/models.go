@@ -63,15 +63,29 @@ type History struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+// Certification carries a certificate either as a link (SourceURL) or as an
+// uploaded document (FileName/FileSize/ContentType, with the on-disk path kept
+// server-side). Exactly one of the two is set; both may be absent, since a
+// certificate with neither a scan nor a link is still worth recording.
+//
+// FilePath is deliberately NOT serialised — it is an internal storage detail,
+// and clients fetch the bytes through the download endpoint instead.
 type Certification struct {
-	ID        uuid.UUID  `json:"id"`
-	UserID    uuid.UUID  `json:"user_id"`
-	Title     string     `json:"title"`
-	IssuedBy  *string    `json:"issued_by,omitempty"`
-	IssuedAt  *time.Time `json:"issued_at,omitempty"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Title       string     `json:"title"`
+	IssuedBy    *string    `json:"issued_by,omitempty"`
+	IssuedAt    *time.Time `json:"issued_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	SourceURL   *string    `json:"source_url,omitempty"`
+	FilePath    *string    `json:"-"`
+	FileName    *string    `json:"file_name,omitempty"`
+	FileSize    *int64     `json:"file_size,omitempty"`
+	ContentType *string    `json:"content_type,omitempty"`
+	HasFile     bool       `json:"has_file"`
+	Source      string     `json:"source"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type Position struct {
@@ -101,6 +115,7 @@ type UpsertCertificationRequest struct {
 	IssuedBy  *string `json:"issued_by"`
 	IssuedAt  *string `json:"issued_at"`
 	ExpiresAt *string `json:"expires_at"`
+	SourceURL *string `json:"source_url" validate:"omitempty,url"`
 }
 
 type CreatePositionRequest struct {

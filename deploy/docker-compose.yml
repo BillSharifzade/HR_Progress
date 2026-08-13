@@ -39,6 +39,13 @@ services:
       ONEF_AUTH_TOKEN: ${ONEF_AUTH_TOKEN:-}
       ONEF_SYNC_INTERVAL: ${ONEF_SYNC_INTERVAL:-24h}
       BASE_PATH: ${BASE_PATH:-}
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+    volumes:
+      # Certificate documents. Lives outside the image so a rebuild keeps the
+      # files, and must be included in backups alongside the database dump —
+      # the rows in user_certifications reference paths in here.
+      - uploads:/app/uploads
 
   web:
     build:
@@ -66,3 +73,4 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  uploads:

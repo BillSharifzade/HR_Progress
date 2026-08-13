@@ -30,6 +30,12 @@ type Config struct {
 	OneFBaseURL      string
 	OneFAuthToken    string
 	OneFSyncInterval time.Duration
+
+	// UploadDir is the root under which uploaded documents (currently only
+	// certificate scans) are written. Backed by a Docker volume in deploy/.
+	UploadDir string
+	// MaxUploadBytes caps a single uploaded file.
+	MaxUploadBytes int64
 }
 
 func Load() (*Config, error) {
@@ -82,6 +88,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ONEF_SYNC_INTERVAL: %w", err)
 	}
 	c.OneFSyncInterval = oneFInterval
+
+	c.UploadDir = env("UPLOAD_DIR", "/app/uploads")
+	c.MaxUploadBytes = 20 << 20 // 20 MiB
+	if v := env("MAX_UPLOAD_MB", ""); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("MAX_UPLOAD_MB: %w", err)
+		}
+		if n <= 0 {
+			return nil, errors.New("MAX_UPLOAD_MB must be positive")
+		}
+		c.MaxUploadBytes = int64(n) << 20
+	}
 
 	return c, nil
 }

@@ -188,10 +188,26 @@ func (r *Repository) CreateHistory(ctx context.Context, userID uuid.UUID, req Cr
 
 // --- Certifications ---
 
+const certificationCols = `id, user_id, title, issued_by, issued_at, expires_at,
+	source_url, file_path, file_name, file_size, content_type, source, created_at, updated_at`
+
+func scanCertification(row pgx.Row) (*Certification, error) {
+	c := &Certification{}
+	err := row.Scan(&c.ID, &c.UserID, &c.Title, &c.IssuedBy, &c.IssuedAt, &c.ExpiresAt,
+		&c.SourceURL, &c.FilePath, &c.FileName, &c.FileSize, &c.ContentType,
+		&c.Source, &c.CreatedAt, &c.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	c.HasFile = c.FilePath != nil
+	return c, nil
+}
+
 func (r *Repository) ListCertifications(ctx context.Context, userID uuid.UUID) ([]Certification, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, title, issued_by, issued_at, expires_at, created_at, updated_at
-		FROM user_certifications WHERE user_id = $1 ORDER BY issued_at DESC NULLS LAST`, userID)
+		SELECT `+certificationCols+`
+		FROM user_certifications WHERE user_id = $1
+		ORDER BY issued_at DESC NULLS LAST, created_at DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,52 +215,141 @@ func (r *Repository) ListCertifications(ctx context.Context, userID uuid.UUID) (
 	var out []Certification
 	for rows.Next() {
 		var c Certification
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Title, &c.IssuedBy,
-			&c.IssuedAt, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Title, &c.IssuedBy, &c.IssuedAt, &c.ExpiresAt,
+			&c.SourceURL, &c.FilePath, &c.FileName, &c.FileSize, &c.ContentType,
+			&c.Source, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
+		c.HasFile = c.FilePath != nil
 		out = append(out, c)
 	}
 	return out, rows.Err()
 }
 
-func (r *Repository) CreateCertification(ctx context.Context, userID uuid.UUID, req UpsertCertificationRequest) (*Certification, error) {
-	var issuedAt, expiresAt *time.Time
-	if req.IssuedAt != nil {
-		t, err := time.Parse("2006-01-02", *req.IssuedAt)
-		if err != nil {
-			return nil, err
-		}
-		issuedAt = &t
+// GetCertification is scoped by user so a mismatched worker_id 404s rather
+// than leaking another person's certificate.
+func (r *Repository) GetCertification(ctx context.Context, id, userID uuid.UUID) (*Certification, error) {
+	c, err := scanCertification(r.pool.QueryRow(ctx,
+		`SELECT `+certificationCols+` FROM user_certifications WHERE id = $1 AND user_id = $2`,
+		id, userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
 	}
-	if req.ExpiresAt != nil {
-		t, err := time.Parse("2006-01-02", *req.ExpiresAt)
-		if err != nil {
-			return nil, err
-		}
-		expiresAt = &t
-	}
-	c := &Certification{}
-	err := r.pool.QueryRow(ctx, `
-		INSERT INTO user_certifications (user_id, title, issued_by, issued_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, user_id, title, issued_by, issued_at, expires_at, created_at, updated_at`,
-		userID, req.Title, req.IssuedBy, issuedAt, expiresAt,
-	).Scan(&c.ID, &c.UserID, &c.Title, &c.IssuedBy,
-		&c.IssuedAt, &c.ExpiresAt, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 
-func (r *Repository) DeleteCertification(ctx context.Context, id, userID uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM user_certifications WHERE id = $1 AND user_id = $2`, id, userID)
+func (r *Repository) CreateCertification(ctx context.Context, userID uuid.UUID, req UpsertCertificationRequest) (*Certification, error) {
+	issuedAt, expiresAt, err := parseCertDates(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	return scanCertification(r.pool.QueryRow(ctx, `
+		INSERT INTO user_certifications (user_id, title, issued_by, issued_at, expires_at, source_url, source)
+		VALUES ($1, $2, $3, $4, $5, $6, 'manual')
+		RETURNING `+certificationCols,
+		userID, strings.TrimSpace(req.Title), blankToNil(req.IssuedBy),
+		issuedAt, expiresAt, blankToNil(req.SourceURL),
+	))
+}
+
+// UpdateCertification leaves the stored file alone — files are replaced through
+// the upload endpoint and removed through DeleteCertificationFile. Setting a
+// source_url on a row that already holds a file is rejected by the
+// user_certifications_not_both constraint.
+func (r *Repository) UpdateCertification(ctx context.Context, id, userID uuid.UUID, req UpsertCertificationRequest) (*Certification, error) {
+	issuedAt, expiresAt, err := parseCertDates(req)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	c, err := scanCertification(r.pool.QueryRow(ctx, `
+		UPDATE user_certifications
+		SET title = $3, issued_by = $4, issued_at = $5, expires_at = $6, source_url = $7
+		WHERE id = $1 AND user_id = $2
+		RETURNING `+certificationCols,
+		id, userID, strings.TrimSpace(req.Title), blankToNil(req.IssuedBy),
+		issuedAt, expiresAt, blankToNil(req.SourceURL),
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return c, err
+}
+
+// AttachCertificationFile records an uploaded document and returns the path of
+// whatever file it displaced, so the caller can unlink it after the row is
+// safely committed. A file and a link are mutually exclusive, so this clears
+// source_url.
+func (r *Repository) AttachCertificationFile(ctx context.Context, id, userID uuid.UUID,
+	relPath, fileName string, size int64, contentType string) (*Certification, *string, error) {
+
+	var previous *string
+	if err := r.pool.QueryRow(ctx,
+		`SELECT file_path FROM user_certifications WHERE id = $1 AND user_id = $2`,
+		id, userID).Scan(&previous); errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	} else if err != nil {
+		return nil, nil, err
+	}
+
+	c, err := scanCertification(r.pool.QueryRow(ctx, `
+		UPDATE user_certifications
+		SET file_path = $3, file_name = $4, file_size = $5, content_type = $6, source_url = NULL
+		WHERE id = $1 AND user_id = $2
+		RETURNING `+certificationCols,
+		id, userID, relPath, fileName, size, contentType,
+	))
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, previous, nil
+}
+
+// DetachCertificationFile clears the file columns and hands back the old path
+// for cleanup. The certificate row itself survives.
+func (r *Repository) DetachCertificationFile(ctx context.Context, id, userID uuid.UUID) (*string, error) {
+	// The old path has to be captured in a CTE: a subquery inside RETURNING
+	// would read the row this same statement is rewriting.
+	var previous *string
+	err := r.pool.QueryRow(ctx, `
+		WITH old AS (
+			SELECT id, file_path FROM user_certifications WHERE id = $1 AND user_id = $2
+		), upd AS (
+			UPDATE user_certifications
+			SET file_path = NULL, file_name = NULL, file_size = NULL, content_type = NULL
+			WHERE id = $1 AND user_id = $2
+			RETURNING id
+		)
+		SELECT old.file_path FROM old JOIN upd ON upd.id = old.id`,
+		id, userID).Scan(&previous)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return previous, err
+}
+
+func parseCertDates(req UpsertCertificationRequest) (*time.Time, *time.Time, error) {
+	issuedAt, err := parseOptionalDate(req.IssuedAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	expiresAt, err := parseOptionalDate(req.ExpiresAt)
+	if err != nil {
+		return nil, nil, err
+	}
+	return issuedAt, expiresAt, nil
+}
+
+// DeleteCertification removes the row and hands back the path of any attached
+// document, so the caller can unlink it once the row is gone.
+func (r *Repository) DeleteCertification(ctx context.Context, id, userID uuid.UUID) (*string, error) {
+	var filePath *string
+	err := r.pool.QueryRow(ctx,
+		`DELETE FROM user_certifications WHERE id = $1 AND user_id = $2 RETURNING file_path`,
+		id, userID).Scan(&filePath)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return filePath, err
 }
 
 // --- Positions ---
