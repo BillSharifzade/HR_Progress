@@ -23,75 +23,95 @@ The form is the standing intake for new hires, so this runs again. 28 rows neede
 
 ---
 
-## Phase 0 — Org cleanup (migration 0016 + `onef/departments.go`)
+## Phase 0 — Org cleanup (migration 0016 + `onef/departments.go`) — ✅ DONE on production 2026-08-13
 
 Two seeded departments are mis-named shells. Migration 0005 expanded the xlsx's bare abbreviations by guess, so the competency matrices sit on departments with no staff, while the departments with staff have no matrix.
 
-| code | name today | users | requirements | verdict |
-|---|---|---|---|---|
-| `ДФП` | Департамент Финансового Планирования | 0 | 51 | rename — real ДФП is Фармацевтической Промоции |
-| `БЮД` | Бюджетный Департамент | 0 | 51 | keep the row, it holds the matrix |
-| `БИЮД` | Бухгалтерский и Юридический  Департамент | 19 | 0 | merge into `БЮД`, then delete |
-
 Neither "Финансового Планирования" nor "Бюджетный" exists in 1F. The xlsx never spells either name out — it only ever writes `ДФП` and `БЮД`.
 
-### 0.1 Rename ДФП in place
+> **Outcome.** Applied to `srv-dchr01` as direct SQL (dry-run → rollback → verify → commit), after a `pg_dump` to `/home/dchradmin/HR_Progress/backups/`. Final state: 7 departments, each holding both its people and its 51 requirements. `ДФП` = Департамент Фармацевтической Промоции (6 users, 3 sections), `БЮД` = Бухгалтерский и Юридический Департамент (19 users, 2 sections). Conserved: 152 users, 33 sections, 20 role grants, 357 requirements, 7 periods. `ДФП2` and `БИЮД` are gone. No redeploy was needed.
+>
+> **Three corrections to what this section originally assumed**, all found while verifying against production:
+> 1. **Eight FK columns reference `departments`, not six.** The list below was derived from the local DB, which is stuck at migration 13; `assessment_period_departments.department_id` (ДФП had a row) and `assessment_interpretations.department_id` both arrived in 0014 and were missed.
+> 2. **`ДФП` and `БИЮД` had been soft-deleted through the UI** at 05:38 UTC on 2026-08-13, stranding 19 active employees inside a deleted department. 0016 therefore also revives the survivor rather than only renaming it. Because both unique indexes are partial (`WHERE deleted_at IS NULL`), rename order matters: the source must be deleted before the target can take its name.
+> 3. **The deployed api image predates the ignore-list restore** (built 2026-07-30T09:33), so production never stopped syncing ДФП — §0.4's claim that those 6 people were frozen was wrong. The real risk ran the other way: repo HEAD *did* ignore ДФП, so a rebuild would have frozen them. `departments.go` is fixed accordingly.
+
+### 0.0 Local and production have diverged — verified 2026-08-12
+
+| code | name | local | production (`srv-dchr01`) |
+|---|---|---|---|
+| `ДФП` | Департамент Финансового Планирования | 0 users, 51 reqs | 0 users, 51 reqs |
+| `ДФП2` | Департамент Фармацевтической Промоции | *absent* | **6 users, 3 sections, 0 reqs** |
+| `БЮД` | Бюджетный Департамент | 0 users, 51 reqs | 0 users, 51 reqs |
+| `БИЮД` | Бухгалтерский и Юридический  Департамент | 19 users, 2 sections, 0 reqs | 19 users, 2 sections, 0 reqs |
+| `ТЕСТ` / `МММ` / `ДРСНР` | test leftovers | present | *absent* |
+
+`ДФП2` is the scar from the 2026-07-29 un-ignore. The sync auto-created the department under a de-duplicated code because `ДФП` was already taken, and it was never cleaned up. Since ДФП went back on the ignore list on 2026-07-30, those **6 users have been skipped by every sync since** — their records are frozen at whatever 1F said two weeks ago.
+
+Both databases are on migration 15, clean. Production has 152 users and syncs daily at 09:34.
+
+**Consequence: every step below must be conditional.** Migration 0016 has to be a no-op for the parts that don't apply to the database it runs against, and must be safe to run twice.
+
+### 0.1 One merge operation, applied twice
+
+Both problems are the same shape: a row holding the matrix, and a different row holding the people. Write it once as a guarded block and apply it to both pairs.
+
+`merge_department(source_code → target_code)` repoints all six FK columns, then deletes the source:
+
+| table | column | ДФП2 → ДФП | БИЮД → БЮД |
+|---|---|---|---|
+| `users` | `department_id` | 6 | 19 |
+| `sections` | `department_id` | 3 | 2 (`ЮО` 5 users, `БО` 13) |
+| `user_roles` | `scope_department_id` | ≥1 | 2 |
+| `audit_logs` | `department_scope_id` | check | 0 |
+| `dept_competency_requirements` | `department_id` | 0 | 0 |
+| `assessment_periods` | `department_id` | check | 0 |
+
+The target keeps its code and its 51 requirements; the source contributes its people and sections and then disappears. Skip the whole block when the source code doesn't exist — that makes ДФП2 a no-op locally.
+
+Two constraints to respect:
+
+- **Section codes** are unique per `(department_id, lower(code))` (migration 0010). Both targets have zero sections, so nothing collides — but assert it rather than assume.
+- **`user_roles_uniq`** covers `(user_id, role, COALESCE(dept), COALESCE(section))` (migration 0011). Repointing could collide if one person holds the same role scoped to both source and target. Delete the losing duplicate first, then update — a bare `UPDATE` would raise.
+
+Delete the source only after asserting zero referencing rows remain. The migration should fail loudly rather than cascade.
+
+### 0.2 Renames
 
 ```
-UPDATE departments SET name = 'Департамент Фармацевтической Промоции' WHERE code = 'ДФП';
-```
-
-Renaming rather than delete-and-recreate is deliberate: it keeps the code `ДФП`, so `uniqueDeptCode` never has to disambiguate, and the 51 requirements stay attached. Creating a new row instead is exactly what produced `ДФП2` on 2026-07-29 — `deriveDeptCode` is plain initials (`competency/codes.go`) and both names initial to `ДФП`.
-
-### 0.2 Merge БИЮД → БЮД, then delete
-
-`БЮД` keeps its code and its 51 requirements, and takes the real name so future syncs match it by normalization:
-
-```
+UPDATE departments SET name = 'Департамент Фармацевтической Промоции'   WHERE code = 'ДФП';
 UPDATE departments SET name = 'Бухгалтерский и Юридический Департамент' WHERE code = 'БЮД';
 ```
 
-> **Assumption to confirm.** The user said the department "must be БЮД", which reads as the *code* being wrong on the auto-created row, not the name. 1F and the questionnaire both call this department Бухгалтерский/Бухгалтерско-Юридический, and its 19 employees will recognise that name — so the code stays `БЮД` and the name becomes the real one. If "Бюджетный Департамент" was meant to be the display name, only this one line changes.
+Renaming rather than delete-and-recreate keeps both codes stable, so `uniqueDeptCode` never has to disambiguate — which is precisely what produced `ДФП2` in the first place (`deriveDeptCode` is plain initials, `competency/codes.go`, and both ДФП names initial identically).
 
-Repoint everything that references the `БИЮД` row, then delete it. Verified against `pg_constraint` — six tables carry a department FK, and only three have rows:
+> **Assumption to confirm.** The user said the department "must be БЮД", which reads as the *code* being wrong on the auto-created row, not the name. 1F and the questionnaire both call it Бухгалтерский/Бухгалтерско-Юридический, and its 19 employees will recognise that name — so the code stays `БЮД` and the name becomes the real one. If "Бюджетный Департамент" was meant as the display name, only that one line changes.
 
-| table | column | rows to move |
-|---|---|---|
-| `users` | `department_id` | 19 |
-| `sections` | `department_id` | 2 (`ЮО` 5 users, `БО` 13) |
-| `user_roles` | `scope_department_id` | 2 |
-| `audit_logs` | `department_scope_id` | 0 |
-| `dept_competency_requirements` | `department_id` | 0 |
-| `assessment_periods` | `department_id` | 0 |
+### 0.3 Keep the sync from re-creating either one
 
-Section codes are unique per `(department_id, lower(code))` (migration 0010) and `БЮД` has no sections, so `ЮО`/`БО` move without collision. Delete `БИЮД` only after asserting it has zero referencing rows — the migration should fail loudly rather than cascade.
+Deleting the source rows is not enough: the next poll sees the 1F names and auto-creates them again. After the 0.2 renames, `normalizeDeptName` matches both directly — it already collapses whitespace runs, which covers the double space in 1F's `Бухгалтерский и Юридический  Департамент`. Add explicit aliases anyway as a cheap guard, same pattern as ДЗЛ:
 
-### 0.3 Keep the sync from re-creating it
-
-Deleting `БИЮД` is not enough on its own: the next poll sees `Бухгалтерский и Юридический  Департамент` (note 1F's double space) and auto-creates it again. Two layers, both cheap:
-
-- The 0.2 rename makes `normalizeDeptName` match it directly — the normalizer already collapses whitespace runs.
-- Add an explicit alias as a belt-and-braces guard, same pattern as ДЗЛ:
-  `normalizeDeptName("Бухгалтерский и Юридический  Департамент") → "БЮД"`
+- `normalizeDeptName("Бухгалтерский и Юридический  Департамент") → "БЮД"`
+- `normalizeDeptName("Департамент Фармацевтической Промоции") → "ДФП"`
 
 ### 0.4 Un-ignore ДФП
 
 Drop `Департамент Фармацевтической Промоции` from `ignoredDepartments` in `backend/internal/onef/departments.go`. `Дусти Фарма` (17 people) and `Департамент Инженерной Экспертизы` (2) stay.
 
-Expected on the next sync: **6 users created**, 3 sections auto-created (`Отдел Аналитики и Аудита`, `Отдел Развития и Науки`, `Отдел Фармацевтической Промоции`), 1 manager grant.
+Effect differs per environment. On **production** the 6 ДФП people already exist (inside `ДФП2`, merged in 0.1) and simply resume syncing — they have been frozen since 2026-07-30. On **local** they are created fresh, with 3 sections and 1 manager grant.
 
-### 0.5 Remove test departments
+### 0.5 Remove test departments — local only
 
-`ТЕСТ` (TESTSTSTSTS, 12 requirements), `МММ` (Мы Можем Многое, 1 user `test head`), `ДРСНР` (already soft-deleted). One `assessment_periods` row points at ТЕСТ or МММ and must go with them; the `test head` user is deactivated, not deleted, so audit history stays intact.
+`ТЕСТ` (TESTSTSTSTS, 12 requirements), `МММ` (Мы Можем Многое, 1 user `test head`), `ДРСНР` (already soft-deleted). Production has none of these, so the block must be guarded on existence. One `assessment_periods` row points at ТЕСТ or МММ and goes with them; the `test head` user is deactivated rather than deleted, so audit history stays intact.
 
 ### 0.6 Then run the sync
 
-Picks up the three people added to 1F since the 10 Aug run — `Одинаев Насрулло` (ДЗЛ), `Кодиров Хабибулло` (АХД), `Нуров Азизджон` (ДИТ) — plus the 6 from ДФП.
+Production picks up whatever 1F has added since its 09:34 run today. Local is two days stale and will also pick up `Одинаев Насрулло` (ДЗЛ), `Кодиров Хабибулло` (АХД) and `Нуров Азизджон` (ДИТ).
 
 ### 0.7 Data hygiene, same pass
 
-- Merge the duplicate `Кенджаева Фарзуна Хушвахтовна` (`emp#178`, `emp#179`) and find out why the `one_f_user_id` match missed it.
 - Convert `emp#10` from Latin to Cyrillic: `Mansurov Aziz Jamshedovich` → `Мансуров Азиз Джамшедович`. It is the only Latin name left and it breaks every name comparison.
+- Merge the duplicate `Кенджаева Фарзуна Хушвахтовна` (`emp#178`, `emp#179` locally) and find out why the `one_f_user_id` match missed it. **Confirmed local; not yet checked on production** — production has 152 users against local's 153, so the duplicate may be local-only.
 
 ### Effect on the import
 
@@ -102,6 +122,8 @@ Picks up the three people added to 1F since the 10 Aug run — `Одинаев �
 | need a human | 28 | **11** |
 
 The 11 remaining: rows 5, 78 (ДФП, absent from 1F), 13, 48, 136, 138, 140, 141 (ДИТ), 114, 133 (ДЗЛ), 132 (ФЭД).
+
+> **These counts are local-derived and must be re-run against production before Phase 3.** Production already carries the 6 ДФП users and has synced more recently, so its matching outcome will differ. The import module produces these numbers itself as dry-run output, so this is a check, not a rewrite — but do not quote the table above to HR as production truth.
 
 ---
 

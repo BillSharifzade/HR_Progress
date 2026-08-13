@@ -12,11 +12,11 @@ func TestIsIgnoredDepartment(t *testing.T) {
 		{"инженерная экспертиза is out of scope", "Департамент Инженерной Экспертизы", true},
 		{"casing and spacing drift still matches", "  департамент   инженерной экспертизы ", true},
 
-		// Un-ignored 2026-07-29, restored 2026-07-30: out of scope after all.
-		// Without this entry the sync recreates the department after every
-		// manual deletion.
-		{"фармацевтическая промоция is out of scope", "Департамент Фармацевтической Промоции", true},
-		{"...including with spacing drift", "департамент  фармацевтической промоции", true},
+		// Back IN scope as of 2026-08-12 (third flip). Its six people must
+		// sync from 1F; migration 0016 gave the ДФП row the real name so they
+		// land in the department that holds the competency matrix.
+		{"фармацевтическая промоция is in scope", "Департамент Фармацевтической Промоции", false},
+		{"...including with spacing drift", "департамент  фармацевтической промоции", false},
 
 		{"unrelated dept syncs", "Финансово-Экономический Департамент", false},
 		{"empty name is not ignored", "", false},
@@ -27,6 +27,25 @@ func TestIsIgnoredDepartment(t *testing.T) {
 				t.Errorf("isIgnoredDepartment(%q) = %v, want %v", tt.dept, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAliasedDeptCode(t *testing.T) {
+	tests := []struct{ in, want string }{
+		// Grammar difference normalization cannot bridge.
+		{"Департамент по Закупкам и Логистике", "ДЗЛ"},
+		// Pinned after migration 0016 so a display-name edit can never send
+		// these back down the auto-create path (which is what created `ДФП2`
+		// and `БИЮД`). Note 1F sends the bookkeeping dept with a double space.
+		{"Бухгалтерский и Юридический  Департамент", "БЮД"},
+		{"Бухгалтерский и Юридический Департамент", "БЮД"},
+		{"Департамент Фармацевтической Промоции", "ДФП"},
+		{"Департамент Информационных Технологий", ""},
+	}
+	for _, tt := range tests {
+		if got := aliasedDeptCode(tt.in); got != tt.want {
+			t.Errorf("aliasedDeptCode(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

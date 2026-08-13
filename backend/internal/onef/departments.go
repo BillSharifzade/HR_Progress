@@ -11,25 +11,34 @@ import (
 // Example: 1F sends "Департамент по Закупкам и Логистике" (dative+preposition);
 // our seed is "Департамент Закупки и Логистики" (genitive). Same dept, different
 // grammar — only an explicit alias handles it.
+// The ДФП/БЮД entries are belt-and-braces rather than strictly necessary:
+// migration 0016 renamed both departments to the names 1F actually sends, so
+// normalizeDeptName already bridges them (it collapses the double space in
+// 1F's "Бухгалтерский и Юридический  Департамент"). They are pinned here so a
+// future edit to either department's display name cannot quietly resurrect the
+// auto-create path that produced `ДФП2` and `БИЮД` in the first place.
 var explicitDeptAliases = map[string]string{
-	normalizeDeptName("Департамент по Закупкам и Логистике"): "ДЗЛ",
+	normalizeDeptName("Департамент по Закупкам и Логистике"):      "ДЗЛ",
+	normalizeDeptName("Департамент Фармацевтической Промоции"):    "ДФП",
+	normalizeDeptName("Бухгалтерский и Юридический  Департамент"): "БЮД",
 }
 
 // ignoredDepartments are 1F department names whose users we never sync.
 // Per product decision 2026-05-26: these are out of scope; their workers
 // should never appear in our DB, even if 1F lists them.
 //
-// "Департамент Фармацевтической Промоции" was briefly un-ignored on 2026-07-29
-// and restored here on 2026-07-30 — it is out of scope after all. Leaving it
-// out of this map is what lets the sync recreate the department, so removing
-// the row from the UI is not enough on its own.
+// "Департамент Фармацевтической Промоции" (ДФП) is deliberately NOT here.
+// It went out of scope on 2026-07-30 and came back in on 2026-08-12; its six
+// people must arrive from both 1F and the profile questionnaire. Note the
+// binary deployed to production on 2026-07-30 predates the brief re-ignore, so
+// production has been syncing ДФП all along — re-adding it here would freeze
+// those six records the moment anyone redeploys.
 //
 // Keys are normalized via normalizeDeptName so minor whitespace/case
 // drift in 1F doesn't accidentally bypass the filter.
 var ignoredDepartments = map[string]bool{
-	normalizeDeptName("Дусти Фарма"):                           true,
-	normalizeDeptName("Департамент Инженерной Экспертизы"):     true,
-	normalizeDeptName("Департамент Фармацевтической Промоции"): true,
+	normalizeDeptName("Дусти Фарма"):                       true,
+	normalizeDeptName("Департамент Инженерной Экспертизы"): true,
 }
 
 // isIgnoredDepartment reports whether a 1F Department value should be
