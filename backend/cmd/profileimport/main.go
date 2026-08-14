@@ -28,12 +28,25 @@ func main() {
 		commit  = flag.Bool("commit", false, "write the changes; without this the run is a dry run")
 		dsn     = flag.String("dsn", os.Getenv("DATABASE_URL"), "Postgres connection string")
 		timeout = flag.Duration("timeout", 5*time.Minute, "overall timeout")
+
+		createMissing = flag.Bool("create-missing", false,
+			"create an employee for a respondent found in neither the database nor 1F (requires -onef)")
+		oneFFile = flag.String("onef", "",
+			"raw 1F payload, used to tell an unknown person from one whose sync is failing")
 	)
 	flag.Parse()
 
 	if *file == "" || *dsn == "" {
 		flag.Usage()
 		fmt.Fprintln(os.Stderr, "\n-file is required, and DATABASE_URL (or -dsn) must be set")
+		os.Exit(2)
+	}
+	if *createMissing && *oneFFile == "" {
+		// Without the roster we cannot distinguish "nobody has this person" from
+		// "1F has them but the sync is failing", and creating a local user in the
+		// second case duplicates them permanently — the sync keys on
+		// one_f_user_id and will never recognise the row we made.
+		fmt.Fprintln(os.Stderr, "-create-missing requires -onef: refusing to create users without checking 1F first")
 		os.Exit(2)
 	}
 
@@ -53,7 +66,18 @@ func main() {
 	}
 	defer pool.Close()
 
-	report, err := profileimport.New(pool).Run(ctx, parsed, !*commit)
+	importer := profileimport.New(pool)
+	if *createMissing {
+		roster, err := profileimport.LoadOneFRoster(*oneFFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "read 1F payload:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("1F roster: %d people (used to avoid creating duplicates)\n", roster.Size())
+		importer = importer.WithCreateMissing(roster)
+	}
+
+	report, err := importer.Run(ctx, parsed, !*commit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "import failed:", err)
 		os.Exit(1)

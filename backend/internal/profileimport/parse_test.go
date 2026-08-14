@@ -331,3 +331,76 @@ func TestReviewedNameOverridesAreReachable(t *testing.T) {
 		t.Error("Хукматов Файзулло must NOT be overridden — different person from Хукматзода")
 	}
 }
+
+// The department alias keys are normalizeDept() output; a typo would silently
+// fall through to the name lookup and leave a created employee unplaced.
+func TestFormDeptAliasKeys(t *testing.T) {
+	forForm := map[string]string{
+		"Департамент Закупа и Логистики":       "ДЗЛ",
+		"Бухгалтерско-Юридический Департамент": "БЮД",
+	}
+	if len(formDeptAliases) != len(forForm) {
+		t.Fatalf("alias map has %d entries, test covers %d", len(formDeptAliases), len(forForm))
+	}
+	for answer, wantCode := range forForm {
+		got, ok := formDeptAliases[normalizeDept(answer)]
+		if !ok {
+			t.Errorf("no alias reachable for %q (key %q)", answer, normalizeDept(answer))
+			continue
+		}
+		if got != wantCode {
+			t.Errorf("%q -> %q, want %q", answer, got, wantCode)
+		}
+	}
+	// The options that match a department name directly must NOT be aliased —
+	// an alias there would mask a rename.
+	for _, direct := range []string{
+		"Департамент Информационных Технологий", "Финансово-Экономический Департамент",
+		"Департамент Человеческих Ресурсов", "Департамент Фармацевтической Промоции",
+		"Административно-Хозяйственный Департамент",
+	} {
+		if _, ok := formDeptAliases[normalizeDept(direct)]; ok {
+			t.Errorf("%q should resolve by name, not by alias", direct)
+		}
+	}
+	// Hyphen/space folding must agree with the 1F integration's normaliser.
+	if normalizeDept("Финансово-Экономический  Департамент") != "финансово экономический департамент" {
+		t.Errorf("normalizeDept folding is wrong: %q", normalizeDept("Финансово-Экономический  Департамент"))
+	}
+}
+
+// The roster gate must be more suspicious than the matcher: a false "1F has
+// them" costs one review, a false "1F lacks them" costs a permanent duplicate.
+func TestOneFRosterIsDeliberatelySuspicious(t *testing.T) {
+	roster := &OneFRoster{names: []string{
+		"Исмоилов Мустафо Шамсулоевич",
+		"Хукматзода Абдулло Файзулло",
+		"Мирзоев Зиё Толибджонович",
+		"Масрур Шарифи",
+	}}
+
+	// Near-misses the matcher refuses must still count as "present in 1F",
+	// so they are held for review rather than created as duplicates.
+	for _, name := range []string{"Исмоилзод Мустафо Шамсуло", "Хукматов Файзулло"} {
+		if got, ok := roster.Contains(name); !ok {
+			t.Errorf("%q must be treated as possibly present in 1F, got absent", name)
+		} else if got == "" {
+			t.Errorf("%q matched but reported no 1F spelling", name)
+		}
+	}
+
+	// Genuinely absent people must remain creatable.
+	for _, name := range []string{
+		"Фаттоев Масрур Саймуродович", "Тимур Мирзоев Фирдавсович",
+		"Бекмурадова Фируза Тулкинжоновна", "Хабиби Мухаммад",
+	} {
+		if got, ok := roster.Contains(name); ok {
+			t.Errorf("%q should be absent from this roster, but matched %q", name, got)
+		}
+	}
+
+	if rosterSuspicionThreshold >= FuzzyThreshold {
+		t.Errorf("roster gate (%.2f) must be looser than the matcher (%.2f)",
+			rosterSuspicionThreshold, FuzzyThreshold)
+	}
+}

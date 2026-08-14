@@ -160,6 +160,7 @@ type RowOutcome struct {
 	Score      float64
 	Candidates []Candidate
 
+	Created     bool
 	Languages   int
 	Employments int
 	Answers     int
@@ -196,7 +197,7 @@ func (rep Report) String() string {
 	imported := rep.countBy(func(o RowOutcome) bool { return o.Skipped == "" && o.Status != MatchUnresolved })
 	fmt.Fprintf(&b, "rows in file      : %d\n", len(rep.Outcomes))
 	fmt.Fprintf(&b, "imported          : %d\n", imported)
-	for _, st := range []MatchStatus{MatchExact, MatchPartial, MatchFuzzy, MatchOverride} {
+	for _, st := range []MatchStatus{MatchExact, MatchPartial, MatchFuzzy, MatchOverride, MatchCreated} {
 		if n := rep.countBy(func(o RowOutcome) bool { return o.Skipped == "" && o.Status == st }); n > 0 {
 			fmt.Fprintf(&b, "  %-14s: %d\n", st, n)
 		}
@@ -234,6 +235,18 @@ func (rep Report) String() string {
 		fmt.Fprintf(&b, "\n--- skipped: %s (%d) ---\n", reason, len(byReason[reason]))
 		for _, o := range byReason[reason] {
 			fmt.Fprintf(&b, "  row %-4d %-40s %s\n", o.SourceRow, trimTo(o.FormName, 40), trimTo(o.Department, 45))
+		}
+	}
+
+	// Employees created from the form — these have no 1F record, so they will
+	// not be picked up by any future sync and are worth eyeballing.
+	if n := rep.countBy(func(o RowOutcome) bool { return o.Created }); n > 0 {
+		fmt.Fprintf(&b, "\n--- CREATED from the questionnaire, no 1F record (%d) ---\n", n)
+		for _, o := range rep.Outcomes {
+			if o.Created {
+				fmt.Fprintf(&b, "  row %-4d %-40s %s\n",
+					o.SourceRow, trimTo(o.FormName, 40), trimTo(o.Department, 45))
+			}
 		}
 	}
 
@@ -276,10 +289,22 @@ func trimTo(s string, n int) string {
 
 // Importer writes questionnaire answers into profile tables.
 type Importer struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	createMissing bool
+	roster        *OneFRoster
 }
 
 func New(pool *pgxpool.Pool) *Importer { return &Importer{pool: pool} }
+
+// WithCreateMissing lets the importer create an employee for a respondent who
+// exists in neither the database nor 1F. The roster is required: without it
+// there is no way to tell a genuinely unknown person from one whose sync is
+// merely failing, and guessing would create duplicates.
+func (im *Importer) WithCreateMissing(roster *OneFRoster) *Importer {
+	im.createMissing = true
+	im.roster = roster
+	return im
+}
 
 // LoadFile reads the JSON intermediate.
 func LoadFile(path string) (*File, error) {
@@ -357,9 +382,39 @@ func (im *Importer) Run(ctx context.Context, f *File, dryRun bool) (*Report, err
 			// not our employee.
 			if outOfScopeDepartments[strings.ToLower(strings.TrimSpace(row.Department))] {
 				out.Skipped = "out-of-scope department, no matching employee"
+				rep.Outcomes = append(rep.Outcomes, out)
+				continue
 			}
-			rep.Outcomes = append(rep.Outcomes, out)
-			continue
+
+			// Nobody in our database matches. Whether that means "create them"
+			// depends on 1F: if 1F holds them, they are an existing employee
+			// whose sync is failing, and creating a local user would duplicate
+			// them once that is fixed — the sync keys on one_f_user_id and
+			// would not recognise the row we made.
+			if im.createMissing {
+				if oneFName, inOneF := im.roster.Contains(row.FullName); inOneF {
+					// Either they are genuinely in 1F and the sync has not
+					// delivered them, or the 1F spelling differs enough that
+					// the matcher would not commit to it. Both need a human;
+					// neither may be auto-created.
+					out.Skipped = "1F has «" + oneFName + "» — held for review, not created"
+					rep.Outcomes = append(rep.Outcomes, out)
+					continue
+				}
+				userID, err := createEmployeeFromForm(ctx, tx, row.FullName, row.Department)
+				if err != nil {
+					return nil, fmt.Errorf("create %q (row %d): %w", row.FullName, row.SourceRow, err)
+				}
+				m = Match{Status: MatchCreated, UserID: userID, Score: 1}
+				out.Status, out.Created = MatchCreated, true
+				// Newly created people must be visible to later rows, so a
+				// duplicate submission updates rather than creating twice.
+				employees = append(employees, Employee{ID: userID, FullName: row.FullName})
+				byName[userID.String()] = Employee{ID: userID, FullName: row.FullName}
+			} else {
+				rep.Outcomes = append(rep.Outcomes, out)
+				continue
+			}
 		}
 
 		out.UserID = m.UserID

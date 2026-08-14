@@ -16,6 +16,7 @@ const (
 	MatchPartial    MatchStatus = "PARTIAL"    // form omitted a name part (usually the patronymic)
 	MatchFuzzy      MatchStatus = "FUZZY"      // close enough on every token
 	MatchOverride   MatchStatus = "OVERRIDE"   // tied by hand after review
+	MatchCreated    MatchStatus = "CREATED"    // no such person anywhere; created from the form
 	MatchUnresolved MatchStatus = "UNRESOLVED" // too weak, or two candidates too close together
 )
 
