@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom';
 
 import {
   listWorkers, createWorker, listSections,
-  type CreateWorkerPayload,
+  type CreateWorkerPayload, type ListWorkersParams,
 } from '../../api/workers';
 import { listDepartments, listGrades } from '../../api/competency';
 import type { WorkerSummary } from '../../types';
@@ -20,6 +20,7 @@ import { PageSkeleton } from '../../components/PageSkeleton';
 import { PageHeader } from '../../components/PageHeader';
 import { useAuth } from '../../auth/useAuth';
 import { OneFSyncButton } from './OneFSyncButton';
+import { ExportWorkersButton } from './ExportWorkersButton';
 
 const GRADE_COLORS: Record<number, string> = {
   1: 'default', 2: 'geekblue', 3: 'cyan', 4: 'green', 5: 'orange',
@@ -197,6 +198,10 @@ export function WorkersList() {
   const isAdmin = user?.roles.includes('HR_ADMIN') ?? false;
   const isSectionHead = user?.roles.includes('SECTION_HEAD') ?? false;
   const isDeptHead = user?.roles.includes('DEPT_HEAD') ?? false;
+  // The bulk export carries contacts, birth dates and assessment feedback for
+  // everyone in it, so it is offered to the roles that manage people — matching
+  // what the endpoint itself enforces.
+  const canExport = isAdmin || isDeptHead || isSectionHead;
 
   // Forced scope for non-admins: SECTION_HEAD → their section; DEPT_HEAD → their dept.
   const forcedSectionId = !isAdmin && isSectionHead ? user?.scope_section_ids?.[0] : undefined;
@@ -211,15 +216,19 @@ export function WorkersList() {
   const effectiveDeptId    = forcedDeptId    ?? deptId;
   const effectiveSectionId = forcedSectionId;
 
+  // One filter object drives both the table and the Excel export, so a
+  // downloaded file can never describe a different population than the screen.
+  const listParams: ListWorkersParams = {
+    search: search || undefined,
+    department_id: effectiveDeptId,
+    section_id:    effectiveSectionId,
+    grade_id: gradeId,
+    include_inactive: includeInactive || undefined,
+  };
+
   const { data: workers = [], isLoading, isFetching } = useQuery({
     queryKey: ['workers', search, effectiveDeptId, effectiveSectionId, gradeId, includeInactive],
-    queryFn: () => listWorkers({
-      search: search || undefined,
-      department_id: effectiveDeptId,
-      section_id:    effectiveSectionId,
-      grade_id: gradeId,
-      include_inactive: includeInactive || undefined,
-    }),
+    queryFn: () => listWorkers(listParams),
     // Keep showing the previous page while a new query (e.g. an extra search
     // character) is in flight, so the search input is never unmounted and
     // keeps focus between keystrokes.
@@ -293,12 +302,15 @@ export function WorkersList() {
       <PageHeader
         title="Сотрудники"
         extra={
-          isAdmin ? (
+          canExport ? (
             <Space>
-              <OneFSyncButton />
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-                Добавить сотрудника
-              </Button>
+              <ExportWorkersButton params={listParams} disabled={workers.length === 0} />
+              {isAdmin && <OneFSyncButton />}
+              {isAdmin && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
+                  Добавить сотрудника
+                </Button>
+              )}
             </Space>
           ) : null
         }

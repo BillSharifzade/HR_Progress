@@ -84,26 +84,77 @@ export async function deleteCertificationFile(workerId: string, certId: string):
 }
 
 /**
- * Downloads a stored certificate. The endpoint needs the Authorization header,
- * so the bytes are fetched through the axios client and handed to the browser
- * as an object URL rather than linked to directly.
+ * Hands a downloaded blob to the browser as a save. Endpoints that serve files
+ * need the Authorization header, so the bytes come through the axios client and
+ * are offered as an object URL rather than linked to directly.
  */
-export async function downloadCertificationFile(
-  workerId: string, certId: string, fileName: string,
-): Promise<void> {
-  const r = await client.get<Blob>(
-    `/workers/${workerId}/certifications/${certId}/file`, { responseType: 'blob' });
-  const url = URL.createObjectURL(r.data);
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
   try {
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName || 'certificate';
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     a.remove();
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * Reads the file name off a Content-Disposition header. The server sends both
+ * an ASCII fallback and the RFC 5987 form; the latter carries the real Cyrillic
+ * name and is preferred whenever it decodes.
+ */
+function fileNameFromDisposition(header: unknown): string | null {
+  if (typeof header !== 'string') return null;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // Malformed encoding — fall through to the ASCII form.
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  return plain ? plain[1] : null;
+}
+
+/**
+ * Turns a failed blob-typed request into a readable message. With
+ * `responseType: 'blob'` even the JSON error body arrives as a Blob, so it has
+ * to be read back before the usual error shape is there to look at.
+ */
+export async function readBlobError(err: unknown): Promise<string | null> {
+  const data = (err as { response?: { data?: unknown } })?.response?.data;
+  if (!(data instanceof Blob)) return null;
+  try {
+    const parsed = JSON.parse(await data.text()) as { error?: { message?: string } };
+    return parsed?.error?.message ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function downloadCertificationFile(
+  workerId: string, certId: string, fileName: string,
+): Promise<void> {
+  const r = await client.get<Blob>(
+    `/workers/${workerId}/certifications/${certId}/file`, { responseType: 'blob' });
+  saveBlob(r.data, fileName || 'certificate');
+}
+
+/**
+ * Downloads the worker register as a formatted XLSX workbook. The same filter
+ * params the list view uses are passed straight through, so the file always
+ * covers exactly the population shown on screen.
+ */
+export async function exportWorkers(params?: ListWorkersParams): Promise<string> {
+  const r = await client.get<Blob>('/workers/export', { params, responseType: 'blob' });
+  const name = fileNameFromDisposition(r.headers?.['content-disposition']) ?? 'workers.xlsx';
+  saveBlob(r.data, name);
+  return name;
 }
 
 // ─── Digital profile ────────────────────────────────────────────────────────

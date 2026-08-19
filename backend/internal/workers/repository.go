@@ -59,9 +59,12 @@ func scanWorker(row pgx.Row) (*Worker, error) {
 	return w, err
 }
 
-func (r *Repository) List(ctx context.Context, f ListFilter) ([]WorkerSummary, error) {
-	conds := []string{"u.deleted_at IS NULL"}
-	args := []any{}
+// listConditions builds the shared WHERE fragment for the worker register, so
+// the list endpoint and the XLSX export can never drift into filtering
+// differently — an export that quietly held more people than the screen showed
+// would be a data-protection problem, not a cosmetic one.
+func listConditions(f ListFilter) (conds []string, args []any) {
+	conds = []string{"u.deleted_at IS NULL"}
 	idx := 1
 
 	if !f.IncludeInactive {
@@ -92,9 +95,14 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]WorkerSummary, e
 			COALESCE(u.telegram_id::text,'') ILIKE $%d
 		)`, idx, idx, idx, idx))
 		args = append(args, "%"+f.Search+"%")
-		idx++
 	}
-	_ = idx
+	return conds, args
+}
+
+func joinConds(conds []string) string { return strings.Join(conds, " AND ") }
+
+func (r *Repository) List(ctx context.Context, f ListFilter) ([]WorkerSummary, error) {
+	conds, args := listConditions(f)
 
 	q := `
 	SELECT u.id, u.employee_no, u.personnel_number, u.one_f_user_id, u.full_name,
@@ -103,7 +111,7 @@ func (r *Repository) List(ctx context.Context, f ListFilter) ([]WorkerSummary, e
 	LEFT JOIN departments d ON d.id = u.department_id AND d.deleted_at IS NULL
 	LEFT JOIN sections    s ON s.id = u.section_id    AND s.deleted_at IS NULL
 	LEFT JOIN grades      g ON g.id = u.grade_id      AND g.deleted_at IS NULL
-	WHERE ` + strings.Join(conds, " AND ") + `
+	WHERE ` + joinConds(conds) + `
 	ORDER BY u.full_name`
 
 	rows, err := r.pool.Query(ctx, q, args...)

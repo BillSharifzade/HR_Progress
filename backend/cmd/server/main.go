@@ -80,9 +80,13 @@ func main() {
 	r.Use(httpx.RequestLogger(log))
 	r.Use(httpx.Recoverer(log))
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   splitCSV(cfg.CORSAllowedOrigins),
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Requested-With"},
+		AllowedOrigins: splitCSV(cfg.CORSAllowedOrigins),
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Authorization", "Content-Type", "X-Requested-With"},
+		// The XLSX export carries its filename in Content-Disposition; without
+		// this the browser hides that header on cross-origin deployments and
+		// every download lands as an untitled blob.
+		ExposedHeaders:   []string{"Content-Disposition"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))

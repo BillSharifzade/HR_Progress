@@ -41,6 +41,8 @@ func (h *Handler) Mount(r chi.Router, jwt *auth.JWTIssuer) {
 		r.Use(auth.RequireAuth(jwt))
 		r.Get("/", h.list)
 		r.Post("/", h.create)
+		// Static segment, so chi matches it ahead of /{worker_id}.
+		r.With(requireExport).Get("/export", h.export)
 		r.Route("/{worker_id}", func(r chi.Router) {
 			r.Get("/", h.get)
 			r.Patch("/", h.update)
@@ -94,6 +96,22 @@ func requireAdmin(next http.Handler) http.Handler {
 		p, ok := auth.PrincipalFrom(r.Context())
 		if !ok || !p.HasRole("HR_ADMIN") {
 			httpx.WriteError(w, http.StatusForbidden, "FORBIDDEN", "HR_ADMIN required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireExport gates the bulk XLSX download. A whole-register file carries
+// contact details, birth dates and assessment feedback for everyone in it, so
+// it is limited to the roles that manage people rather than to any signed-in
+// employee.
+func requireExport(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := auth.PrincipalFrom(r.Context())
+		if !ok || !(p.HasRole("HR_ADMIN") || p.HasRole("DEPT_HEAD") || p.HasRole("SECTION_HEAD")) {
+			httpx.WriteError(w, http.StatusForbidden, "FORBIDDEN",
+				"export requires HR_ADMIN, DEPT_HEAD or SECTION_HEAD")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -200,34 +218,40 @@ func (h *Handler) revokeRole(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+// parseListFilter reads the register's filter set off the query string. The
+// list view and the XLSX export share it so a downloaded file can never cover a
+// different population than the screen it was triggered from.
+func parseListFilter(r *http.Request) (ListFilter, error) {
 	f := ListFilter{}
-	if v := r.URL.Query().Get("department_id"); v != "" {
+	for _, p := range []struct {
+		name string
+		dst  **uuid.UUID
+	}{
+		{"department_id", &f.DepartmentID},
+		{"section_id", &f.SectionID},
+		{"grade_id", &f.GradeID},
+	} {
+		v := r.URL.Query().Get(p.name)
+		if v == "" {
+			continue
+		}
 		id, err := uuid.Parse(v)
 		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PARAM", "department_id")
-			return
+			return f, errors.New(p.name)
 		}
-		f.DepartmentID = &id
-	}
-	if v := r.URL.Query().Get("section_id"); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PARAM", "section_id")
-			return
-		}
-		f.SectionID = &id
-	}
-	if v := r.URL.Query().Get("grade_id"); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			httpx.WriteError(w, http.StatusBadRequest, "INVALID_PARAM", "grade_id")
-			return
-		}
-		f.GradeID = &id
+		*p.dst = &id
 	}
 	f.Search = r.URL.Query().Get("search")
 	f.IncludeInactive = r.URL.Query().Get("include_inactive") == "true"
+	return f, nil
+}
+
+func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+	f, err := parseListFilter(r)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "INVALID_PARAM", err.Error())
+		return
+	}
 
 	list, err := h.repo.List(r.Context(), f)
 	if err != nil {
